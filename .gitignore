@@ -1,0 +1,9 @@
+data
+data/*
+data_new
+data_new/*
+output
+output/*
+wandb
+wandb/*
+*.out

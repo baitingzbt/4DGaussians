@@ -1,0 +1,4 @@
+# ninja log v5
+1	8861	1704331301945458610	/home/baiting/4DGaussians/submodules/simple-knn/build/temp.linux-x86_64-cpython-37/simple_knn.o	ae1109ff63e85411
+0	18083	1704331311153619903	/home/baiting/4DGaussians/submodules/simple-knn/build/temp.linux-x86_64-cpython-37/ext.o	3a734dc1944e75e7
+1	53046	1704331346130210348	/home/baiting/4DGaussians/submodules/simple-knn/build/temp.linux-x86_64-cpython-37/spatial.o	ac7e961a0648f43d
