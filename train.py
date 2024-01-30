@@ -158,7 +158,7 @@ def scene_reconstruction(
             if iteration % 100 == 0:
                 infos = {
                     "Loss": round(ema_loss_for_log, 7),
-                    "psnr": round(float(psnr_.detach().cpu().numpy()), 2),
+                    "psnr": round(psnr_.detach().cpu().numpy().item(), 2),
                     "point": total_point
                 }
                 progress_bar.set_postfix({k: str(v) for k, v in infos.items()})
@@ -176,14 +176,17 @@ def scene_reconstruction(
 
                 if (iteration % 3000 == 2999): # or (iteration == 1):
                     scene.save(iteration, stage)
-                    test_views = [test_cams[i] for i in range(40)] + list(reversed([test_cams[len(test_cams) - i - 1] for i in range(180)]))
-                    train_views = [train_cams[i] for i in range(40)] + list(reversed([train_cams[len(train_cams) - i - 1] for i in range(180)]))
+                    test_views = [test_cams[i] for i in range(40)] + list(reversed([test_cams[len(test_cams) - i - 1] for i in range(40)]))
+                    train_views = [train_cams[i] for i in range(40)] + list(reversed([train_cams[len(train_cams) - i - 1] for i in range(40)]))
                     render_training_image(
                         scene, gaussians, test_views, pipe, background, stage+"test",
                         iteration, timer.get_elapsed_time(), save_video, save_pointclound, save_images, use_wandb)
                     render_training_image(
                         scene, gaussians, train_views, pipe, background, stage+"train",
                         iteration, timer.get_elapsed_time(), save_video, save_pointclound, save_images, use_wandb)
+                    
+                    print("\n[ITER {}] Saving Checkpoint".format(iteration))
+                    torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" +f"_{stage}_" + str(iteration) + ".pth")
 
             timer.start()
             # Densification
@@ -219,10 +222,6 @@ def scene_reconstruction(
                 gaussians.optimizer.step()
                 gaussians.optimizer.zero_grad(set_to_none = True)
 
-            if (iteration in checkpoint_iterations):
-                print("\n[ITER {}] Saving Checkpoint".format(iteration))
-                torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" +f"_{stage}_" + str(iteration) + ".pth")
-
 def training(dataset, hyper, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, expname, use_wandb):
     prepare_output_and_logger(expname)
     gaussians = GaussianModel(dataset.sh_degree, hyper)
@@ -233,12 +232,14 @@ def training(dataset, hyper, opt, pipe, testing_iterations, saving_iterations, c
     scene_reconstruction(
         dataset, opt, hyper, pipe, testing_iterations, saving_iterations,
         checkpoint_iterations, checkpoint, debug_from, gaussians,
-        scene, "coarse", opt.coarse_iterations, timer, use_wandb
+        scene, "coarse", opt.coarse_iterations, timer,
+        use_wandb, save_video=True, save_images=False, save_pointclound=True
     )
     scene_reconstruction(
         dataset, opt, hyper, pipe, testing_iterations, saving_iterations,
         checkpoint_iterations, checkpoint, debug_from, gaussians,
-        scene, "fine", opt.iterations, timer, use_wandb
+        scene, "fine", opt.iterations, timer,
+        use_wandb, save_video=True, save_images=False, save_pointclound=True
     )
 
 def prepare_output_and_logger(expname: str) -> None:

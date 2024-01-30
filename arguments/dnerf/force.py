@@ -2,6 +2,7 @@ _base_ = './dnerf_default.py'
 
 USE_FORCE = True
 USE_TIME = True
+BLEND_TIME_FORCE = True
 RESOLUTION = [64, 64, 64]
 INPUT_DIM = 3
 
@@ -9,13 +10,13 @@ if USE_TIME:
     RESOLUTION += [64] # 64, 128
     INPUT_DIM += 1
 
-if USE_FORCE:
+if USE_FORCE and not BLEND_TIME_FORCE:
     RESOLUTION += [64] # [32, 32, 32, 64]
     INPUT_DIM += 1 # 4
 
 OptimizationParams = dict(
-    coarse_iterations = 6000, # default: 3000
-    iterations = 300000
+    coarse_iterations = 8000, # default: 3000
+    iterations = 500000
 )
 
 ModelParams = dict(
@@ -33,5 +34,7 @@ ModelHiddenParams = dict(
     defor_depth = 4,
     use_force = USE_FORCE,
     use_time = USE_TIME,
+    blend_time_force = BLEND_TIME_FORCE,
     multires = [1, 2]
 )
+# CUDA_VISIBLE_DEVICES=2 nohup python train.py --data_path data_new/scene2_force1 data_new/scene2_force2 --expname "force_scene2_blend2" --configs arguments/dnerf/force.py --multi_cam --wandb > force_scene2_blend2.out

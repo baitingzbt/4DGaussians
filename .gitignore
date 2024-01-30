@@ -6,4 +6,6 @@ output
 output/*
 wandb
 wandb/*
+logs
+logs/*
 *.out

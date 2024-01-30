@@ -54,8 +54,11 @@ def init_grid_param(
     a: float = 0.1,
     b: float = 0.5
 ):
+    print(f"grid_nd = {grid_nd}\nin_dim = {in_dim}\nout_dim = {out_dim}\nlen(reso) = {len(reso)}")
+    # breakpoint()
     assert in_dim == len(reso), "Resolution must have same number of elements as input-dimension"
-    has_time_planes = in_dim == 4
+    has_time_planes = bool(in_dim >= 4)
+    has_force_planes = bool(in_dim >= 5)
     assert grid_nd <= in_dim
     coo_combs = list(itertools.combinations(range(in_dim), grid_nd))
     grid_coefs = nn.ParameterList()
@@ -63,7 +66,9 @@ def init_grid_param(
         new_grid_coef = nn.Parameter(torch.empty(
             [1, out_dim] + [reso[cc] for cc in coo_comb[::-1]]
         ))
-        if has_time_planes and 3 in coo_comb:  # Initialize time planes to 1
+        # x, y, z, time, force;
+        # below means if time or force exist in current coo_comb, initialize those planes to 1
+        if max(coo_comb) >= 3:
             nn.init.ones_(new_grid_coef)
         else:
             nn.init.uniform_(new_grid_coef, a=a, b=b)

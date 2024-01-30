@@ -25,6 +25,7 @@ class Deformation(nn.Module):
         self.grid_pe = grid_pe
         self.no_grid = args.no_grid
         self.grid = HexPlaneField(args.bounds, args.kplanes_config, args.multires)
+        self.blend_time_force = args.blend_time_force
         self.args = args
         # self.args.empty_voxel=True
         if self.args.empty_voxel:
@@ -76,11 +77,13 @@ class Deformation(nn.Module):
             nn.ReLU(), nn.Linear(self.W, self.W, dtype=torch.float32, bias=True),
             nn.ReLU(), nn.Linear(self.W, 1, dtype=torch.float32, bias=True)
         )
-        self.force_embed = nn.Linear(4, 1)
-        self.force_deform = nn.Sequential(
-            nn.ReLU(), nn.Linear(self.W, self.W, dtype=torch.float32, bias=True),
-            nn.ReLU(), nn.Linear(self.W, 4, dtype=torch.float32, bias=True)
-        )
+        self.force_embed = nn.Sequential(nn.Linear(4, 4), nn.ReLU(), nn.Linear(4, 1))
+        if self.blend_time_force:
+            self.force_time_embed = nn.Sequential(nn.ReLU(), nn.Linear(2, 1))
+        # self.force_deform = nn.Sequential(
+        #     nn.ReLU(), nn.Linear(self.W, self.W, dtype=torch.float32, bias=True),
+        #     nn.ReLU(), nn.Linear(self.W, 4, dtype=torch.float32, bias=True)
+        # )
         self.shs_deform = nn.Sequential(
             nn.ReLU(), nn.Linear(self.W, self.W, dtype=torch.float32, bias=True),
             nn.ReLU(), nn.Linear(self.W, 16 * 3, dtype=torch.float32, bias=True)
@@ -95,23 +98,18 @@ class Deformation(nn.Module):
         #     print("\t----> has_grid <----")
         
         ''' embedding force from dim4 to dim1, to reduce numerical instability '''
-        # print(force_emb.shape)
-        # breakpoint()
         if force_emb is not None: # NOTE: if use_force = True
-            force_emb = self.force_embed(force_emb)
-        # print(force_emb.shape)
-        # breakpoint()
+            force_emb = torch.exp(self.force_embed(force_emb / 10))
+        if self.blend_time_force:
+            time_emb = self.force_time_embed(torch.cat((time_emb, force_emb), dim=1))
+            force_emb = None # NOTE: force information merged into time
 
 
         grid_feature = self.grid(rays_pts_emb[:, :3], time_emb, force_emb)
-        # print(f"\tfeature = {grid_feature.detach().cpu().numpy()[0][0]} deformation.py line 100")
         if self.grid_pe > 1:
-            # print(f"\tgrid_pe > 1")
             grid_feature = poc_fre(grid_feature, self.grid_pe)
         hidden = torch.cat([grid_feature], -1).to(dtype=torch.float32)
-        # print(f"\thidden = {hidden.detach().cpu().numpy()[0][0]} deformation.py line 105")
         hidden2 = self.feature_out(hidden)
-        # print(f"\thidden2 = {hidden2.detach().cpu().numpy()[0][0]} deformation.py line 111")
         return hidden2
 
 
@@ -149,13 +147,9 @@ class Deformation(nn.Module):
         if self.args.no_dx:
             pts = rays_pts_emb[:, :3]
         else:
-            # print(f"\thidden = {hidden.detach().cpu().numpy()[0][0]} deformation.py line 150")
             dx = self.pos_deform(hidden)
-            # print(f"\tdx = {dx.detach().cpu().numpy()[0][0]} deformation.py line 152")
-            # pts1 = rays_pts_emb[:, :3] * mask
-            # print(f"\tpts1 = {pts1.detach().cpu().numpy()[0][0]} deformation.py line 154")
             pts = rays_pts_emb[:, :3] * mask + dx
-            # print(f"\tpts = {pts.detach().cpu().numpy()[0][0]} deformation.py line 156")
+
 
         if self.args.no_ds:
             scales = scales_emb[:, :3]
@@ -253,11 +247,9 @@ class deform_network(nn.Module):
         point_emb = poc_fre(point, self.pos_poc)
         scales_emb = poc_fre(scales, self.rotation_scaling_poc)
         rotations_emb = poc_fre(rotations, self.rotation_scaling_poc)
-        # print(f"forward dynamic with time input: {times_sel}")
         means3D, scales, rotations, opacity, shs = self.deformation_net(
             point_emb, scales_emb, rotations_emb, opacity, shs, None, times_sel, force
         )
-        # print(f"\tmeans3D:{means3D.detach().cpu().numpy()[0][0]} deformation.py line 258 (later)")
         return means3D, scales, rotations, opacity, shs
     
     def get_mlp_parameters(self):

@@ -384,7 +384,7 @@ def readForceSyntheticInfo(
     white_background,
     eval,
     extension="",
-    multi_cam=False
+    multi_cam=True
 ):
 
     timestamp_mapper, max_time = read_force_timeline(paths)
@@ -392,7 +392,7 @@ def readForceSyntheticInfo(
         cam_path = os.path.join(path, f'{split}/cam_{i}')
         return readCamerasFromTransforms(cam_path, "transforms.json", white_background, extension, timestamp_mapper)
 
-    train_cams = 2 if multi_cam else 1 # max: 100
+    train_cams = 50 if multi_cam else 1 # max: 100
     test_cams = 2 if multi_cam else 1 # max: 20
 
     train_cam_infos = []

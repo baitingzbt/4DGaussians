@@ -107,6 +107,7 @@ class ModelHiddenParams(ParamGroup):
         self.apply_rotation=False
         self.use_time = True # NOTE: Added by BZ
         self.use_force = False # NOTE: Added by BZ
+        self.blend_time_force = False # NOTE: Added by BZ
         super().__init__(parser, "ModelHiddenParams")
         
 class OptimizationParams(ParamGroup):
@@ -139,7 +140,7 @@ class OptimizationParams(ParamGroup):
         self.opacity_reset_interval = 3000
         self.densification_interval = 100
         self.densify_from_iter = 500
-        self.densify_until_iter = 15_000 # NOTE: Changed by BZ, original 15000, new 1_000_000
+        self.densify_until_iter = 1000000 # NOTE: Changed by BZ, original 15000, new 1_000_000
         self.densify_grad_threshold_coarse = 0.0002
         self.densify_grad_threshold_fine_init = 0.0002
         self.densify_grad_threshold_after = 0.0002
