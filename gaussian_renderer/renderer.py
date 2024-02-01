@@ -23,14 +23,14 @@ def render(
     bg_color: torch.Tensor,
     scaling_modifier = 1.0,
     override_color = None,
-    stage="fine"
+    stage="fine",
+    # prev_hidden=None,
 ):
     """
     Render the scene. 
     
     Background tensor (bg_color) must be on GPU!
     """
- 
     # Create zero tensor. We will use it to make pytorch return gradients of the 2D (screen-space) means
     screenspace_points = torch.zeros_like(pc.get_xyz, dtype=pc.get_xyz.dtype, requires_grad=True, device="cuda") + 0
     try:
@@ -75,11 +75,11 @@ def render(
         scales = pc._scaling
         rotations = pc._rotation
 
-    if stage == "coarse" :
+    if stage.startswith("coarse"):
         means3D_final, scales_final, rotations_final, opacity_final, shs_final = means3D, scales, rotations, opacity, shs
     else:
         means3D_final, scales_final, rotations_final, opacity_final, shs_final \
-            = pc._deformation(means3D, scales, rotations, opacity, shs, time, force)
+            = pc._deformation.forward(means3D, scales, rotations, opacity, shs, time, force)
 
     scales_final = pc.scaling_activation(scales_final)
     rotations_final = pc.rotation_activation(rotations_final)
@@ -99,7 +99,7 @@ def render(
         colors_precomp = override_color
 
     # Rasterize visible Gaussians to image, obtain their radii (on screen).
-    rendered_image, radii, depth = rasterizer(
+    rendered_image, radii, depth = rasterizer.forward(
         means3D = means3D_final,
         means2D = means2D,
         shs = shs_final,
@@ -110,5 +110,5 @@ def render(
         cov3D_precomp = cov3D_precomp
     )
 
-    return rendered_image, screenspace_points, radii > 0, radii, depth
+    return rendered_image, screenspace_points, radii > 0, radii, depth # , hidden
 

@@ -54,7 +54,7 @@ def init_grid_param(
     a: float = 0.1,
     b: float = 0.5
 ):
-    print(f"grid_nd = {grid_nd}\nin_dim = {in_dim}\nout_dim = {out_dim}\nlen(reso) = {len(reso)}")
+    # print(f"grid_nd = {grid_nd}\nin_dim = {in_dim}\nout_dim = {out_dim}\nlen(reso) = {len(reso)}")
     # breakpoint()
     assert in_dim == len(reso), "Resolution must have same number of elements as input-dimension"
     has_time_planes = bool(in_dim >= 4)
@@ -84,9 +84,15 @@ def interpolate_ms_features(
     concat_features: bool,
     num_levels: Optional[int],
 ) -> torch.Tensor:
-    coo_combs = list(itertools.combinations(
-        range(pts.shape[-1]), grid_dimensions)
+    # sample_range = range(min(pts.shape[-1], 4))
+    # sample_dim = 2
+    coo_combs = list(
+        itertools.combinations(range(pts.shape[-1]), grid_dimensions)
     )
+    # if grid_dimensions == 3:
+    #     coo_combs = [comb + (4, ) for comb in coo_combs]
+    # print(coo_combs)
+    # breakpoint()
     if num_levels is None:
         num_levels = len(ms_grids)
     multi_scale_interp = [] if concat_features else 0.
@@ -130,7 +136,6 @@ class HexPlaneField(nn.Module):
         self.grid_config = [planeconfig]
         self.multiscale_res_multipliers = multires
         self.concat_features = True
-
         # 1. Init planes
         self.grids = nn.ModuleList()
         self.feat_dim = 0
@@ -153,7 +158,14 @@ class HexPlaneField(nn.Module):
             else:
                 self.feat_dim = gp[-1].shape[1]
             self.grids.append(gp)
-    
+
+        # self.recur_feat_dim = int(self.feat_dim + self.feat_dim / 2)
+        # self.feature_aggr = nn.Sequential(
+        #     nn.Linear(self.recur_feat_dim, self.recur_feat_dim),
+        #     nn.ReLU(),
+        #     nn.Linear(self.recur_feat_dim, self.feat_dim)
+        # )
+
     @property
     def get_aabb(self):
         return self.aabb[0], self.aabb[1]
@@ -183,19 +195,20 @@ class HexPlaneField(nn.Module):
             concat_features=self.concat_features,
             num_levels=None
         )
-        # print(f"\ttime = {time.detach().cpu().numpy()[0][0]} hexplane.py line 182")
-        # print(f"\tfeature={features.detach().cpu().numpy()[0][0]} hexplane.py line 183")
         if len(features) < 1:
             features = torch.zeros((0, 1)).to(features.device)
-        # print(f"\tfeature={features.detach().cpu().numpy()[0][0]} hexplane.py line 186")
         return features
 
     def forward(
         self,
         pts: torch.Tensor,
         time: Optional[torch.Tensor] = None,
-        force: Optional[torch.Tensor] = None
+        force: Optional[torch.Tensor] = None,
+        prev_features: Optional[torch.Tensor] = None,
     ):
+        # print(f"input prev_feat: {prev_features}")
         features = self.get_density(pts, time, force)
-        # print(f"\tfeature={features.detach().cpu().numpy()[0][0]} hexplane.py line 196")
+        # if prev_features is None:
+        #     prev_features = torch.zeros((features.shape[0], int(self.feat_dim / 2)), device=features.device, dtype=torch.float32)
+        # features = self.feature_aggr(torch.cat((features, prev_features), dim=1))
         return features

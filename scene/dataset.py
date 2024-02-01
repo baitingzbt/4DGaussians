@@ -33,6 +33,14 @@ class FourDGSdataset(Dataset):
             time = caminfo.time
             mask = caminfo.mask
             force = caminfo.force
+            if time != 0:
+                prev_caminfo: CameraInfo = self.dataset[index-1]
+                prev_image = prev_caminfo.image
+                prev_time = prev_caminfo.time
+            else:
+                prev_image = torch.zeros_like(image)
+                prev_time = -1
+            # print(f"-----> time = {time}, prev_time = {prev_time}, diff = {prev_time - time}")
         else:
             image, w2c, time = self.dataset[index]
             R,T = w2c
@@ -40,7 +48,7 @@ class FourDGSdataset(Dataset):
             FovY = focal2fov(self.dataset.focal[0], image.shape[1])
             mask=None
         return Camera(
-            colmap_id=index, R=R, T=T, FoVx=FovX, FoVy=FovY,
+            colmap_id=index, R=R, T=T, FoVx=FovX, FoVy=FovY, prev_image=prev_image,
             image=image, gt_alpha_mask=None, image_name=f"{index}",
             uid=index, data_device=torch.device("cuda"), time=time, mask=mask, force=force
         )

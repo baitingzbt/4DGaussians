@@ -50,17 +50,17 @@ class Deformation(nn.Module):
     
     def create_net(self):
         mlp_out_dim = 0
-        if self.grid_pe !=0:
+        if self.grid_pe != 0:
             grid_out_dim = self.grid.feat_dim + (self.grid.feat_dim) * 2 
         else:
             grid_out_dim = self.grid.feat_dim
 
         self.feature_out = [nn.Linear(mlp_out_dim + grid_out_dim, self.W, dtype=torch.float32, bias=True)]
-        
         for i in range(self.D - 1):
             self.feature_out.append(nn.ReLU())
             self.feature_out.append(nn.Linear(self.W, self.W, dtype=torch.float32, bias=True))
         self.feature_out = nn.Sequential(*self.feature_out)
+
         self.pos_deform = nn.Sequential(
             nn.ReLU(), nn.Linear(self.W, self.W, dtype=torch.float32, bias=True),
             nn.ReLU(), nn.Linear(self.W, 3, dtype=torch.float32, bias=True)
@@ -89,14 +89,7 @@ class Deformation(nn.Module):
             nn.ReLU(), nn.Linear(self.W, 16 * 3, dtype=torch.float32, bias=True)
         )
 
-    def query_time_force(self, rays_pts_emb, scales_emb, rotations_emb, time_feature, time_emb, force_emb):
-        # print(f"\ndeformation.py query_time_force deformation.py line 93 \n\tinput time: {time_emb.detach().cpu().numpy()[0][0]}")
-        # if self.no_grid:
-        #     print("\t----> no_grid <----")
-        #     h = torch.cat([rays_pts_emb[:, :3], time_emb, force_emb], -1)
-        # else:
-        #     print("\t----> has_grid <----")
-        
+    def query_time_force(self, rays_pts_emb, scales_emb, rotations_emb, time_feature, time_emb, force_emb, prev_hidden):
         ''' embedding force from dim4 to dim1, to reduce numerical instability '''
         if force_emb is not None: # NOTE: if use_force = True
             force_emb = torch.exp(self.force_embed(force_emb / 10))
@@ -104,8 +97,7 @@ class Deformation(nn.Module):
             time_emb = self.force_time_embed(torch.cat((time_emb, force_emb), dim=1))
             force_emb = None # NOTE: force information merged into time
 
-
-        grid_feature = self.grid(rays_pts_emb[:, :3], time_emb, force_emb)
+        grid_feature = self.grid(rays_pts_emb[:, :3], time_emb, force_emb, prev_hidden)
         if self.grid_pe > 1:
             grid_feature = poc_fre(grid_feature, self.grid_pe)
         hidden = torch.cat([grid_feature], -1).to(dtype=torch.float32)
@@ -117,11 +109,15 @@ class Deformation(nn.Module):
     def get_empty_ratio(self):
         return self.ratio
     
-    def forward(self, rays_pts_emb, scales_emb=None, rotations_emb=None, opacity = None, shs_emb=None, time_feature=None, time_emb=None, force_emb=None):
+    def forward(
+        self, rays_pts_emb, scales_emb=None, rotations_emb=None, opacity = None, shs_emb=None, 
+        time_feature=None, time_emb=None, force_emb=None, prev_hidden=None,
+    ):
+        # print(f"defomation.py line 124:\n\tforwarding: time_emb = {time_emb}, prev_hidden = {prev_hidden}", )
         if time_emb is None:
-            return self.forward_static(rays_pts_emb[:,:3])
+            return self.forward_static(rays_pts_emb[:, :3])
         else:
-            return self.forward_dynamic(rays_pts_emb, scales_emb, rotations_emb, opacity, shs_emb, time_feature, time_emb, force_emb)
+            return self.forward_dynamic(rays_pts_emb, scales_emb, rotations_emb, opacity, shs_emb, time_feature, time_emb, force_emb, prev_hidden)
     
 
     def forward_static(self, rays_pts_emb):
@@ -132,10 +128,10 @@ class Deformation(nn.Module):
 
 
     # TODO: EDIT THIS FUNCTION OR WRITE A NEW ONE FOR FORCE
-    def forward_dynamic(self, rays_pts_emb, scales_emb, rotations_emb, opacity_emb, shs_emb, time_feature, time_emb, force_emb):
+    def forward_dynamic(self, rays_pts_emb, scales_emb, rotations_emb, opacity_emb, shs_emb, time_feature, time_emb, force_emb, prev_hidden):
         time_input = time_emb[:, :1] if self.args.use_time else None
         force_input = force_emb[:, 3:7] if self.args.use_force else None # NOTE: drops xyz, keep dir+strength only
-        hidden = self.query_time_force(rays_pts_emb, scales_emb, rotations_emb, time_feature, time_input, force_input)
+        hidden = self.query_time_force(rays_pts_emb, scales_emb, rotations_emb, time_feature, time_input, force_input, prev_hidden)
 
         if self.args.static_mlp:
             mask = self.static_mlp(hidden)
@@ -177,8 +173,8 @@ class Deformation(nn.Module):
         else:
             dshs = self.shs_deform(hidden).reshape([shs_emb.shape[0], 16, 3])
             shs = shs_emb * mask.unsqueeze(-1) + dshs
-        # print(f"\tpts = {pts.detach().cpu().numpy()[0][0]} deformation.py line 184")
-        return pts, scales, rotations, opacity, shs
+        # print(f"\thidden output = {hidden.shape} deformation.py line 176")
+        return pts, scales, rotations, opacity, shs #, hidden
     
     def get_mlp_parameters(self):
         parameter_list = []
@@ -228,8 +224,8 @@ class deform_network(nn.Module):
         self.apply(initialize_weights)
         # print(self)
 
-    def forward(self, point, scales=None, rotations=None, opacity=None, shs=None, times_sel=None, force=None):
-        return self.forward_dynamic(point, scales, rotations, opacity, shs, times_sel, force)
+    def forward(self, point, scales=None, rotations=None, opacity=None, shs=None, times_sel=None, force=None, prev_hidden=None):
+        return self.forward_dynamic(point, scales, rotations, opacity, shs, times_sel, force, prev_hidden)
 
     @property
     def get_aabb(self):
@@ -243,14 +239,14 @@ class deform_network(nn.Module):
         points = self.deformation_net(points)
         return points
     
-    def forward_dynamic(self, point, scales=None, rotations=None, opacity=None, shs=None, times_sel=None, force=None):
+    def forward_dynamic(self, point, scales=None, rotations=None, opacity=None, shs=None, times_sel=None, force=None, prev_hidden=None):
         point_emb = poc_fre(point, self.pos_poc)
         scales_emb = poc_fre(scales, self.rotation_scaling_poc)
         rotations_emb = poc_fre(rotations, self.rotation_scaling_poc)
-        means3D, scales, rotations, opacity, shs = self.deformation_net(
-            point_emb, scales_emb, rotations_emb, opacity, shs, None, times_sel, force
+        means3D, scales, rotations, opacity, shs = self.deformation_net.forward(
+            point_emb, scales_emb, rotations_emb, opacity, shs, None, times_sel, force, prev_hidden
         )
-        return means3D, scales, rotations, opacity, shs
+        return means3D, scales, rotations, opacity, shs #, hidden
     
     def get_mlp_parameters(self):
         return self.deformation_net.get_mlp_parameters() + list(self.timenet.parameters())

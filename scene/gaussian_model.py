@@ -618,7 +618,7 @@ class GaussianModel:
         rotations = self._rotation.detach()
         opacity = self._opacity.detach()
         time =  torch.tensor(0).to("cuda").repeat(means3D.shape[0],1)
-        means3D_deform, scales_deform, rotations_deform, _ = self._deformation(means3D, scales, rotations, opacity, time)
+        means3D_deform, scales_deform, rotations_deform, _, hidden = self._deformation(means3D, scales, rotations, opacity, time)
         position_error = (means3D_deform - means3D)**2
         rotation_error = (rotations_deform - rotations)**2 
         scaling_erorr = (scales_deform - scales)**2
@@ -695,7 +695,11 @@ class GaussianModel:
         time_reg = time_smoothness_weight * self._time_regulation()
         plane_reg = plane_tv_weight * self._plane_regulation()
         l1_time_reg = l1_time_planes_weight * self._l1_regulation()
-        # if time_reg.isnan().any(): print("NaN in time_reg"); quit()
-        # if plane_reg.isnan().any(): print("NaN in plane_reg"); quit()
-        # if l1_time_reg.isnan().any(): print("NaN in l1_time_reg"); quit()
-        return time_reg + plane_reg + l1_time_reg
+        total_reg = time_reg + plane_reg + l1_time_reg
+        reg_loss = dict(
+            time_reg=time_reg.detach().cpu().item(),
+            plane_reg=plane_reg.detach().cpu().item(),
+            l1_time_reg=l1_time_reg.detach().cpu().item(),
+            total_reg=total_reg
+        )
+        return reg_loss

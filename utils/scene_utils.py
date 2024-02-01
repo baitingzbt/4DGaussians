@@ -18,7 +18,7 @@ def render_training_image(
     viewpoints: List[Camera],
     pipe,
     background,
-    stage,
+    stage: str,
     iteration,
     time_now,
     save_video: bool = True,
@@ -29,11 +29,13 @@ def render_training_image(
     gaussians._deformation.eval()
     gaussians._deformation.deformation_net.eval()
     def render_helper(viewpoint: Camera, path: str = None) -> np.ndarray:
+        # if stage.startswith('coarse') or viewpoint.time == 0.0:
+        #     prev_hidden = None
         image, _, _, _, depth = render(viewpoint, gaussians, pipe, background, stage=stage)
         times =  time_now / 60
         label2 = "time:%.2f" % times + 'mins'
         label1 = f"stage:{stage},iter:{iteration}\nframe_t:{viewpoint.time}"
-        gt_np = viewpoint.original_image.permute(1,2,0).cpu().numpy()
+        gt_np = viewpoint.original_image.permute(1, 2, 0).cpu().numpy()
         image_np = image.permute(1, 2, 0).cpu().numpy()  # 转换通道顺序为 (H, W, 3)
         depth_np = depth.permute(1, 2, 0).cpu().numpy()
         depth_np /= depth_np.max()
@@ -56,7 +58,7 @@ def render_training_image(
         if save_images:
             image_with_labels.save(path)
         image_with_label_arr = np.array(image_with_labels)
-        return image_with_label_arr
+        return image_with_label_arr # , hidden
     
     render_base_path = os.path.join(scene.model_path, f"{stage}_render")
     point_cloud_path = os.path.join(render_base_path,"pointclouds")

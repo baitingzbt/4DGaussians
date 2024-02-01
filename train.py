@@ -32,6 +32,7 @@ import wandb
 from utils.scene_utils import render_training_image
 import copy
 from typing import List
+from collections import defaultdict
 
 to8b = lambda x : (255 * np.clip(x.cpu().numpy(), 0, 1)).astype(np.uint8)
 
@@ -60,7 +61,6 @@ def scene_reconstruction(
     if checkpoint:
         if stage == "coarse" and stage not in checkpoint:
             print("start from fine stage, skip coarse stage.")
-            # process is in the coarse stage, but start from fine stage
             return
         if stage in checkpoint: 
             (model_params, first_iter) = torch.load(checkpoint)
@@ -80,9 +80,12 @@ def scene_reconstruction(
     # video_cams = scene.getVideoCameras()
     test_cams = scene.getTestCameras()
     train_cams = scene.getTrainCameras()
+    test_views = [test_cams[i] for i in range(40)] + list(reversed([test_cams[len(test_cams) - i - 1] for i in range(40)]))
+    train_views = [train_cams[i] for i in range(40)] + list(reversed([train_cams[len(train_cams) - i - 1] for i in range(40)]))
 
     viewpoint_stack = [i for i in tqdm(train_cams, desc='loading data...')]
-    temp_list = copy.deepcopy(viewpoint_stack)
+    random.shuffle(viewpoint_stack)
+    # temp_list = copy.deepcopy(viewpoint_stack)
     batch_size = opt.batch_size
 
     for iteration in range(first_iter, final_iter+1):        
@@ -93,37 +96,39 @@ def scene_reconstruction(
         if iteration % 1000 == 0:
             gaussians.oneupSHdegree()
 
-        # Pick a random Camera
-        idx = 0
-        viewpoint_cams = []
-        while idx < batch_size :    
-            viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack)-1))
-            if not viewpoint_stack :
-                viewpoint_stack = temp_list.copy()
-            viewpoint_cams.append(viewpoint_cam)
-            idx += 1
-        if len(viewpoint_cams) == 0:
-            continue
+        # # Pick a random Camera
+        # idx = 0
+        # viewpoint_cams = []
+        # while idx < batch_size:
+        #     query_idx = randint(0, len(viewpoint_stack) - 1)
+        #     viewpoint_cam = viewpoint_stack.pop(query_idx)
+        #     if not viewpoint_stack:
+        #         viewpoint_stack = temp_list.copy()
+        #     viewpoint_cams.append(viewpoint_cam)
+        #     idx += 1
+        # if len(viewpoint_cams) == 0:
+        #     continue
 
         # Render
         if (iteration - 1) == debug_from:
             pipe.debug = True
         
         total_point = gaussians._xyz.shape[0]
-        image_tensor = torch.zeros(size=(len(viewpoint_cams), 3, 800, 800), device='cuda')
-        gt_image_tensor = torch.zeros(size=(len(viewpoint_cams), 3, 800, 800), device='cuda')
+        image_tensor = torch.zeros(size=(batch_size, 3, 800, 800), device='cuda')
+        gt_image_tensor = torch.zeros(size=(batch_size, 3, 800, 800), device='cuda')
         radii_list = []
         visibility_filter_list = []
         viewspace_point_tensor_list = []
-        for i, viewpoint_cam in enumerate(viewpoint_cams):
-            image, viewspace_point_tensor, visibility_filter, radii, depth \
-                = render(viewpoint_cam, gaussians, pipe, background, stage=stage)
-            image_tensor[i] = image.unsqueeze(0)
-            gt_image = viewpoint_cam.original_image.cuda()
-            gt_image_tensor[i] = gt_image.unsqueeze(0)
-            radii_list.append(radii.unsqueeze(0))
-            visibility_filter_list.append(visibility_filter.unsqueeze(0))
-            viewspace_point_tensor_list.append(viewspace_point_tensor)
+        # for i, viewpoint_cam in enumerate(viewpoint_stack):
+        viewpoint_cam = viewpoint_stack[iteration % len(viewpoint_stack)]
+        image, viewspace_point_tensor, visibility_filter, radii, depth \
+            = render(viewpoint_cam, gaussians, pipe, background, stage=stage)
+        image_tensor[0] = image.unsqueeze(0)
+        gt_image = viewpoint_cam.original_image.cuda()
+        gt_image_tensor[0] = gt_image.unsqueeze(0)
+        radii_list.append(radii.unsqueeze(0))
+        visibility_filter_list.append(visibility_filter.unsqueeze(0))
+        viewspace_point_tensor_list.append(viewspace_point_tensor)
         
         radii = torch.cat(radii_list, 0).max(dim=0).values
         visibility_filter = torch.cat(visibility_filter_list).any(dim=0)
@@ -134,9 +139,11 @@ def scene_reconstruction(
         psnr_ = psnr(image_tensor, gt_image_tensor).mean().double()
 
         # norm
-        if stage == "fine" and hyper.time_smoothness_weight != 0:
-            tv_loss = gaussians.compute_regulation(hyper.time_smoothness_weight, hyper.l1_time_planes, hyper.plane_tv_weight)
-            loss += tv_loss
+        if stage == "fine":
+            tv_loss_dict = gaussians.compute_regulation(hyper.time_smoothness_weight, hyper.l1_time_planes, hyper.plane_tv_weight)
+            loss += tv_loss_dict['total_reg']
+        else:
+            tv_loss_dict = defaultdict(int) # assume to be 0 for coarse
 
         if opt.lambda_dssim != 0:
             ssim_loss = ssim(image_tensor,gt_image_tensor)
@@ -159,7 +166,10 @@ def scene_reconstruction(
                 infos = {
                     "Loss": round(ema_loss_for_log, 7),
                     "psnr": round(psnr_.detach().cpu().numpy().item(), 2),
-                    "point": total_point
+                    "point": total_point,
+                    "time_reg": round(tv_loss_dict['time_reg'], 7),
+                    "plane_reg": round(tv_loss_dict['plane_reg'], 7),
+                    "l1_time_reg": round(tv_loss_dict['l1_time_reg'], 7)
                 }
                 progress_bar.set_postfix({k: str(v) for k, v in infos.items()})
                 progress_bar.update(100)
@@ -174,10 +184,8 @@ def scene_reconstruction(
             
             if dataset.render_process:
 
-                if (iteration % 3000 == 2999): # or (iteration == 1):
+                if (iteration % 3000 == 2999) or (iteration == final_iter): # or (iteration == 1):
                     scene.save(iteration, stage)
-                    test_views = [test_cams[i] for i in range(40)] + list(reversed([test_cams[len(test_cams) - i - 1] for i in range(40)]))
-                    train_views = [train_cams[i] for i in range(40)] + list(reversed([train_cams[len(train_cams) - i - 1] for i in range(40)]))
                     render_training_image(
                         scene, gaussians, test_views, pipe, background, stage+"test",
                         iteration, timer.get_elapsed_time(), save_video, save_pointclound, save_images, use_wandb)
