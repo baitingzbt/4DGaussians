@@ -16,6 +16,7 @@ from random import randint
 from utils.loss_utils import l1_loss, ssim, l2_loss, lpips_loss
 from gaussian_renderer.renderer import render
 import sys
+import math
 from scene import Scene, GaussianModel
 from scene.cameras import Camera
 from utils.general_utils import safe_state
@@ -83,8 +84,10 @@ def scene_reconstruction(
     test_views = [test_cams[i] for i in range(40)] + list(reversed([test_cams[len(test_cams) - i - 1] for i in range(40)]))
     train_views = [train_cams[i] for i in range(40)] + list(reversed([train_cams[len(train_cams) - i - 1] for i in range(40)]))
 
-    viewpoint_stack = [i for i in tqdm(train_cams, desc='loading data...')]
+    viewpoint_stack = [i for i in tqdm(train_cams, desc='loading data...', )]
     random.shuffle(viewpoint_stack)
+    choice_weight = np.ones(len(viewpoint_stack)) * 1e6
+    # choice_weight = np.array([1 / len(viewpoint_stack) for _ in range(len(viewpoint_stack))])
     # temp_list = copy.deepcopy(viewpoint_stack)
     batch_size = opt.batch_size
 
@@ -120,7 +123,14 @@ def scene_reconstruction(
         visibility_filter_list = []
         viewspace_point_tensor_list = []
         # for i, viewpoint_cam in enumerate(viewpoint_stack):
-        viewpoint_cam = viewpoint_stack[iteration % len(viewpoint_stack)]
+        cam_idx = np.random.choice(
+            len(viewpoint_stack),
+            p=choice_weight / np.sum(choice_weight)
+        )
+        # viewpoint_cam = np.random.choice(viewpoint_stack, p=choice_weight)
+        # viewpoint_cam = viewpoint_stack[iteration % len(viewpoint_stack)]
+        viewpoint_cam = viewpoint_stack[cam_idx]
+
         image, viewspace_point_tensor, visibility_filter, radii, depth \
             = render(viewpoint_cam, gaussians, pipe, background, stage=stage)
         image_tensor[0] = image.unsqueeze(0)
@@ -154,6 +164,8 @@ def scene_reconstruction(
         #     loss += opt.lambda_lpips * lpipsloss
 
         loss.backward()
+        # significantly intensify difference between losses with exp function
+        choice_weight[cam_idx] = math.exp(loss.detach().cpu().item() * 10)
         viewspace_point_tensor_grad = torch.zeros_like(viewspace_point_tensor)
         for idx in range(0, len(viewspace_point_tensor_list)):
             viewspace_point_tensor_grad = viewspace_point_tensor_grad + viewspace_point_tensor_list[idx].grad
@@ -162,7 +174,7 @@ def scene_reconstruction(
             ema_loss_for_log = 0.4 * loss.item() + 0.6 * ema_loss_for_log
             ema_psnr_for_log = 0.4 * psnr_ + 0.6 * ema_psnr_for_log
             total_point = gaussians._xyz.shape[0]
-            if iteration % 100 == 0:
+            if iteration % 500 == 0:
                 infos = {
                     "Loss": round(ema_loss_for_log, 7),
                     "psnr": round(psnr_.detach().cpu().numpy().item(), 2),
@@ -172,7 +184,7 @@ def scene_reconstruction(
                     "l1_time_reg": round(tv_loss_dict['l1_time_reg'], 7)
                 }
                 progress_bar.set_postfix({k: str(v) for k, v in infos.items()})
-                progress_bar.update(100)
+                progress_bar.update(500)
                 if use_wandb:
                     wandb.log(infos)
 
@@ -183,9 +195,10 @@ def scene_reconstruction(
             timer.pause()
             
             if dataset.render_process:
-
-                if (iteration % 3000 == 2999) or (iteration == final_iter): # or (iteration == 1):
-                    scene.save(iteration, stage)
+                
+                log_every = 6000
+                save_every = 60000
+                if (iteration % log_every == log_every - 1) or (iteration == final_iter): # or (iteration == 1):
                     render_training_image(
                         scene, gaussians, test_views, pipe, background, stage+"test",
                         iteration, timer.get_elapsed_time(), save_video, save_pointclound, save_images, use_wandb)
@@ -193,7 +206,9 @@ def scene_reconstruction(
                         scene, gaussians, train_views, pipe, background, stage+"train",
                         iteration, timer.get_elapsed_time(), save_video, save_pointclound, save_images, use_wandb)
                     
+                if (iteration % save_every == save_every - 1) or (iteration == final_iter):
                     print("\n[ITER {}] Saving Checkpoint".format(iteration))
+                    scene.save(iteration, stage)
                     torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" +f"_{stage}_" + str(iteration) + ".pth")
 
             timer.start()
