@@ -33,6 +33,7 @@ class FourDGSdataset(Dataset):
             time = caminfo.time
             mask = caminfo.mask
             force = caminfo.force
+            force_idx = caminfo.force_idx
             if time != 0:
                 prev_caminfo: CameraInfo = self.dataset[index-1]
                 prev_image = prev_caminfo.image
@@ -50,7 +51,7 @@ class FourDGSdataset(Dataset):
         return Camera(
             colmap_id=index, R=R, T=T, FoVx=FovX, FoVy=FovY, prev_image=prev_image,
             image=image, gt_alpha_mask=None, image_name=f"{index}",
-            uid=index, data_device=torch.device("cuda"), time=time, mask=mask, force=force
+            uid=index, data_device=torch.device("cuda"), time=time, mask=mask, force=force, force_idx=force_idx
         )
 
     def __len__(self):

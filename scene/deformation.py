@@ -77,7 +77,7 @@ class Deformation(nn.Module):
             nn.ReLU(), nn.Linear(self.W, self.W, dtype=torch.float32, bias=True),
             nn.ReLU(), nn.Linear(self.W, 1, dtype=torch.float32, bias=True)
         )
-        self.force_embed = nn.Sequential(nn.Linear(4, 4), nn.ReLU(), nn.Linear(4, 1))
+        self.force_embedder = nn.Sequential(nn.Linear(4, 4), nn.ReLU(), nn.Linear(4, 1))
         if self.blend_time_force:
             self.force_time_embed = nn.Sequential(nn.ReLU(), nn.Linear(2, 1))
         # self.force_deform = nn.Sequential(
@@ -92,7 +92,7 @@ class Deformation(nn.Module):
     def query_time_force(self, rays_pts_emb, scales_emb, rotations_emb, time_feature, time_emb, force_emb, prev_hidden):
         ''' embedding force from dim4 to dim1, to reduce numerical instability '''
         if force_emb is not None: # NOTE: if use_force = True
-            force_emb = torch.exp(self.force_embed(force_emb / 10))
+            force_emb = torch.exp(self.force_embedder(force_emb / 10))
         if self.blend_time_force:
             time_emb = self.force_time_embed(torch.cat((time_emb, force_emb), dim=1))
             force_emb = None # NOTE: force information merged into time

@@ -45,7 +45,7 @@ class Scene:
         if isinstance(args.source_path, list):
             # quick fix, use multiple forces together
             print("Found force transforms.json file, assuming Blender data set for MANY force")
-            scene_info = sceneLoadTypeCallbacks["Force"](args.source_path, args.white_background, args.eval, args.extension, args.multi_cam)
+            scene_info = sceneLoadTypeCallbacks["Force"](args.source_path, args.n_train_cams, args.n_test_cams, args.white_background, args.eval, args.extension)
             dataset_type="blender"
         elif os.path.exists(os.path.join(args.source_path, "sparse")):
             scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval, args.llffhold)

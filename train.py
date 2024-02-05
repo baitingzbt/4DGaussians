@@ -55,7 +55,8 @@ def scene_reconstruction(
     use_wandb: bool,
     save_video: bool = True,
     save_images: bool = False,
-    save_pointclound: bool = True
+    save_pointclound: bool = True,
+    weighted_loss: bool = False
 ):
     first_iter = 0
     gaussians.training_setup(opt)
@@ -81,14 +82,18 @@ def scene_reconstruction(
     # video_cams = scene.getVideoCameras()
     test_cams = scene.getTestCameras()
     train_cams = scene.getTrainCameras()
-    test_views = [test_cams[i] for i in range(40)] + list(reversed([test_cams[len(test_cams) - i - 1] for i in range(40)]))
-    train_views = [train_cams[i] for i in range(40)] + list(reversed([train_cams[len(train_cams) - i - 1] for i in range(40)]))
+    test_views = [test_cams[i] for i in range(len(test_cams))]
+    train_views = [train_cams[i] for i in range(80)] + list(reversed([train_cams[len(train_cams) - i - 1] for i in range(80)]))
 
     viewpoint_stack = [i for i in tqdm(train_cams, desc='loading data...', )]
-    random.shuffle(viewpoint_stack)
-    choice_weight = np.ones(len(viewpoint_stack)) * 1e6
+    viewpoint_force_idx = [cam.force_idx for cam in viewpoint_stack]
+    n_forces = max(viewpoint_force_idx) + 1
+    # random.shuffle(zip(viewpoint_stack, viewpoint_force_idx))
+    # viewpoint_stack, viewpoint_force_idx
+    # choice_weight = np.ones(len(viewpoint_stack)) * 1e6
     # choice_weight = np.array([1 / len(viewpoint_stack) for _ in range(len(viewpoint_stack))])
-    # temp_list = copy.deepcopy(viewpoint_stack)
+    temp_list = copy.deepcopy(viewpoint_stack)
+    temp_list_idx = copy.deepcopy(viewpoint_force_idx)
     batch_size = opt.batch_size
 
     for iteration in range(first_iter, final_iter+1):        
@@ -99,18 +104,33 @@ def scene_reconstruction(
         if iteration % 1000 == 0:
             gaussians.oneupSHdegree()
 
-        # # Pick a random Camera
-        # idx = 0
-        # viewpoint_cams = []
-        # while idx < batch_size:
-        #     query_idx = randint(0, len(viewpoint_stack) - 1)
-        #     viewpoint_cam = viewpoint_stack.pop(query_idx)
-        #     if not viewpoint_stack:
-        #         viewpoint_stack = temp_list.copy()
-        #     viewpoint_cams.append(viewpoint_cam)
-        #     idx += 1
-        # if len(viewpoint_cams) == 0:
-        #     continue
+        # Pick a random Camera
+        if not weighted_loss:
+            idx = 0
+            viewpoint_cams = []
+            viewpoint_cam_force_idxs = []
+            while idx < batch_size:
+                
+                query_idx = randint(0, len(viewpoint_stack) - 1)
+                viewpoint_cam = viewpoint_stack.pop(query_idx)
+                viewpoint_cam_force_idx = viewpoint_force_idx.pop(query_idx)
+                if not viewpoint_stack:
+                    viewpoint_stack = temp_list.copy()
+                    viewpoint_force_idx = temp_list_idx.copy()
+                viewpoint_cams.append(viewpoint_cam)
+                viewpoint_cam_force_idxs.append(viewpoint_force_idx)
+                idx += 1
+            if len(viewpoint_cams) == 0:
+                continue
+        # else:
+        #     # we sample force_idx first, but some forces 
+        #     force_idx_left = list(set(viewpoint_force_idx))
+        #     if stage == 'coarse' or iteration < 20000:
+        #         query_force_idx = np.random.randint(0, n_forces)
+        #     else:
+        #         # easy/hard                          naive/easy/hard
+        #         p = [0.3, 0.7] if n_forces == 2 else [0.1, 0.4, 0.5]
+        #         query_force_idx = np.random.choice([fi for fi in range(n_forces)], p=p)
 
         # Render
         if (iteration - 1) == debug_from:
@@ -123,22 +143,23 @@ def scene_reconstruction(
         visibility_filter_list = []
         viewspace_point_tensor_list = []
         # for i, viewpoint_cam in enumerate(viewpoint_stack):
-        cam_idx = np.random.choice(
-            len(viewpoint_stack),
-            p=choice_weight / np.sum(choice_weight)
-        )
+        # choice_weight /= np.sum(choice_weight)
+        # cam_idx = np.random.choice(
+        #     len(viewpoint_stack),
+        #     p=choice_weight / np.sum(choice_weight)
+        # )
         # viewpoint_cam = np.random.choice(viewpoint_stack, p=choice_weight)
         # viewpoint_cam = viewpoint_stack[iteration % len(viewpoint_stack)]
-        viewpoint_cam = viewpoint_stack[cam_idx]
-
-        image, viewspace_point_tensor, visibility_filter, radii, depth \
-            = render(viewpoint_cam, gaussians, pipe, background, stage=stage)
-        image_tensor[0] = image.unsqueeze(0)
-        gt_image = viewpoint_cam.original_image.cuda()
-        gt_image_tensor[0] = gt_image.unsqueeze(0)
-        radii_list.append(radii.unsqueeze(0))
-        visibility_filter_list.append(visibility_filter.unsqueeze(0))
-        viewspace_point_tensor_list.append(viewspace_point_tensor)
+        # viewpoint_cam = viewpoint_stack[cam_idx]
+        for i, (viewpoint_cam, viewpoint_cam_force_idx) in enumerate(zip(viewpoint_cams, viewpoint_cam_force_idxs)):
+            image, viewspace_point_tensor, visibility_filter, radii, depth \
+                = render(viewpoint_cam, gaussians, pipe, background, stage=stage)
+            image_tensor[i] = image.unsqueeze(0)
+            gt_image = viewpoint_cam.original_image.cuda()
+            gt_image_tensor[i] = gt_image.unsqueeze(0)
+            radii_list.append(radii.unsqueeze(0))
+            visibility_filter_list.append(visibility_filter.unsqueeze(0))
+            viewspace_point_tensor_list.append(viewspace_point_tensor)
         
         radii = torch.cat(radii_list, 0).max(dim=0).values
         visibility_filter = torch.cat(visibility_filter_list).any(dim=0)
@@ -150,13 +171,13 @@ def scene_reconstruction(
 
         # norm
         if stage == "fine":
-            tv_loss_dict = gaussians.compute_regulation(hyper.time_smoothness_weight, hyper.l1_time_planes, hyper.plane_tv_weight)
+            tv_loss_dict = gaussians.compute_regulation(hyper.time_smoothness_weight, hyper.l1_time_planes, hyper.plane_tv_weight, hyper.l2_plane_reg)
             loss += tv_loss_dict['total_reg']
         else:
             tv_loss_dict = defaultdict(int) # assume to be 0 for coarse
 
         if opt.lambda_dssim != 0:
-            ssim_loss = ssim(image_tensor,gt_image_tensor)
+            ssim_loss = ssim(image_tensor, gt_image_tensor)
             loss += opt.lambda_dssim * (1.0-ssim_loss)
         
         # if opt.lambda_lpips !=0:
@@ -164,8 +185,9 @@ def scene_reconstruction(
         #     loss += opt.lambda_lpips * lpipsloss
 
         loss.backward()
-        # significantly intensify difference between losses with exp function
-        choice_weight[cam_idx] = math.exp(loss.detach().cpu().item() * 10)
+        # # significantly intensify difference between losses with exp function
+        # if weighted_loss:
+        #     choice_weight[cam_idx] = loss # math.exp(loss.detach().cpu().item() * 10)
         viewspace_point_tensor_grad = torch.zeros_like(viewspace_point_tensor)
         for idx in range(0, len(viewspace_point_tensor_list)):
             viewspace_point_tensor_grad = viewspace_point_tensor_grad + viewspace_point_tensor_list[idx].grad
@@ -245,7 +267,7 @@ def scene_reconstruction(
                 gaussians.optimizer.step()
                 gaussians.optimizer.zero_grad(set_to_none = True)
 
-def training(dataset, hyper, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, expname, use_wandb):
+def training(dataset, hyper, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, expname, use_wandb, weighted_loss):
     prepare_output_and_logger(expname)
     gaussians = GaussianModel(dataset.sh_degree, hyper)
     dataset.model_path = args.model_path
@@ -256,13 +278,13 @@ def training(dataset, hyper, opt, pipe, testing_iterations, saving_iterations, c
         dataset, opt, hyper, pipe, testing_iterations, saving_iterations,
         checkpoint_iterations, checkpoint, debug_from, gaussians,
         scene, "coarse", opt.coarse_iterations, timer,
-        use_wandb, save_video=True, save_images=False, save_pointclound=True
+        use_wandb, save_video=True, save_images=False, save_pointclound=True, weighted_loss=weighted_loss
     )
     scene_reconstruction(
         dataset, opt, hyper, pipe, testing_iterations, saving_iterations,
         checkpoint_iterations, checkpoint, debug_from, gaussians,
         scene, "fine", opt.iterations, timer,
-        use_wandb, save_video=True, save_images=False, save_pointclound=True
+        use_wandb, save_video=True, save_images=False, save_pointclound=True, weighted_loss=weighted_loss
     )
 
 def prepare_output_and_logger(expname: str) -> None:
@@ -294,20 +316,29 @@ if __name__ == "__main__":
     hp = ModelHiddenParams(parser)
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
-    parser.add_argument('--multi_cam', action='store_true', default=False)
     parser.add_argument('--wandb', action='store_true', default=False)
     parser.add_argument("--test_iterations", nargs="+", type=int, default=[3000 * i for i in range(100)])
     parser.add_argument("--save_iterations", nargs="+", type=int, default=[1000, 3000, 4000, 5000, 6000, 7_000, 9000, 10000, 12000, 14000, 20000, 30_000, 45000, 60000])
-    parser.add_argument("--quiet", action="store_true")
+    parser.add_argument("--quiet", action="store_true", default=False)
+    parser.add_argument("--weighted_loss", action="store_true", default=False) # whether we pick random camera, or pick camera with higher prob for higher loss
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)
     parser.add_argument("--expname", type=str, default = "")
     parser.add_argument("--configs", type=str, default = "")
-    parser.add_argument("--data_path", type=list, nargs='+', default = [])
+    parser.add_argument("--data_path", type=str, nargs='+', default = [])
+    parser.add_argument("--n_train_cams", type=int, nargs='+', default = [])
+    parser.add_argument("--n_test_cams", type=int, nargs='+', default = [])
+    parser.add_argument("--l2_plane_reg", action='store_true', default = False)
     
     args = parser.parse_args()
-    args.source_path = [''.join(p) for p in args.data_path] # overload
-    args.data_path = args.source_path
+    args.source_path = args.data_path
+    lp.n_train_cams = [int(val) for val in args.n_train_cams]
+    lp.n_test_cams = [int(val) for val in args.n_test_cams]
+    op.l2_plane_reg = bool(args.l2_plane_reg)
+
+    assert len(args.n_train_cams) == len(args.n_test_cams) == len(args.data_path)
+
+
     args.save_iterations.append(args.iterations)
     if args.configs:
         import mmcv
@@ -316,14 +347,13 @@ if __name__ == "__main__":
         args = merge_hparams(args, config)
 
     if args.wandb:
-        wandb.init(project='4dgs_force')
+        wandb.init(project='4dgs_force', name=args.expname)
 
     # Initialize system state (RNG)
     safe_state(args.quiet)
 
     # Start GUI server, configure and run training
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
-    lp.multi_cam = args.multi_cam
     training(
         lp.extract(args),
         hp.extract(args),
@@ -335,7 +365,8 @@ if __name__ == "__main__":
         args.start_checkpoint,
         args.debug_from,
         args.expname,
-        args.wandb
+        args.wandb,
+        args.weighted_loss
     )
 
     # All done

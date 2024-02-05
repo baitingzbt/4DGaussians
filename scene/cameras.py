@@ -24,7 +24,8 @@ class Camera(nn.Module):
         time = 0,
         mask = None,
         depth = None,
-        force: np.ndarray = None
+        force: np.ndarray = None,
+        force_idx: int = -1
     ) -> None:
         super(Camera, self).__init__()
 
@@ -50,6 +51,7 @@ class Camera(nn.Module):
         self.depth = depth
         self.mask = mask
         self.force = force
+        self.force_idx = force_idx
         self.zfar = 100.0
         self.znear = 0.01
 

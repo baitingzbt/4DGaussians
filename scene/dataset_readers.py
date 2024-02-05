@@ -48,6 +48,7 @@ class CameraInfo(NamedTuple):
     time : float
     mask: np.array
     force: np.array = None
+    force_idx: int = -1
    
 class SceneInfo(NamedTuple):
     point_cloud: BasicPointCloud
@@ -272,7 +273,8 @@ def readCamerasFromTransforms(
     transformsfile: str,
     white_background: bool,
     extension: str,
-    mapper: Dict
+    mapper: Dict,
+    force_idx: int,
 ) -> List[CameraInfo]:
     cam_infos = []
     with open(os.path.join(path, transformsfile)) as json_file:
@@ -307,7 +309,7 @@ def readCamerasFromTransforms(
         cam_infos.append(
             CameraInfo(
                 uid=idx, R=R, T=T, FovY=fovy, FovX=fovx, image=image, image_path=image_path,
-                image_name=image_name, width=image.shape[1], height=image.shape[2], time = time, mask=None, force=force
+                image_name=image_name, width=image.shape[1], height=image.shape[2], time = time, mask=None, force=force, force_idx=force_idx
             )
         )
     return cam_infos
@@ -381,30 +383,32 @@ def readNerfSyntheticInfo(path, white_background, eval, extension=".png"):
 
 def readForceSyntheticInfo(
     paths: List[str],
+    n_train_cams: List[int],
+    n_test_cams: List[int],
     white_background,
     eval,
     extension="",
-    multi_cam=True
 ):
 
     timestamp_mapper, max_time = read_force_timeline(paths)
-    def helper(path: str, i: int, split: str) -> List[CameraInfo]:
+    def helper(path: str, i: int, split: str, force_idx: int) -> List[CameraInfo]:
+        # force_setting is id of force
         cam_path = os.path.join(path, f'{split}/cam_{i}')
-        return readCamerasFromTransforms(cam_path, "transforms.json", white_background, extension, timestamp_mapper)
+        return readCamerasFromTransforms(cam_path, "transforms.json", white_background, extension, timestamp_mapper, force_idx)
 
-    train_cams = 50 if multi_cam else 1 # max: 100
-    test_cams = 2 if multi_cam else 1 # max: 20
+    # train_cams = 50 if multi_cam else 1 # max: 100
+    # test_cams = 2 if multi_cam else 1 # max: 20
 
     train_cam_infos = []
     test_cam_infos = []
     video_cam_infos = []
-    for _path in paths:
+    for force_idx, (_path, train_cams, test_cams) in enumerate(zip(paths, n_train_cams, n_test_cams)):
         print(f"\t ----> Reading force data from path = {_path} <----")
         for i in tqdm(range(train_cams), desc='Reading Training from:'):
-            train_cam_infos += helper(_path, i, 'train')
+            train_cam_infos += helper(_path, i, 'train', force_idx)
 
         for i in tqdm(range(test_cams), desc='Reading Test Transforms'):
-            test_cam_infos += helper(_path, i, 'test')
+            test_cam_infos += helper(_path, i, 'test', force_idx)
 
         for i in tqdm(range(train_cams), desc='Generating Video Transforms'):
             cam_path = os.path.join(_path, f'train/cam_{i}')
