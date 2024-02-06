@@ -42,15 +42,12 @@ def scene_reconstruction(
     opt: GroupParams,
     hyper: GroupParams,
     pipe: GroupParams,
-    testing_iterations,
-    saving_iterations, 
-    checkpoint_iterations,
-    checkpoint,
+    checkpoint: str,
     debug_from,
     gaussians: GaussianModel,
     scene: Scene,
     stage: str,
-    train_iter,
+    train_iter: int,
     timer: Timer,
     use_wandb: bool,
     save_video: bool = True,
@@ -58,6 +55,9 @@ def scene_reconstruction(
     save_pointclound: bool = True,
     weighted_loss: bool = False
 ):
+    if train_iter <= 0:
+        return
+    
     first_iter = 0
     gaussians.training_setup(opt)
     if checkpoint:
@@ -171,7 +171,7 @@ def scene_reconstruction(
 
         # norm
         if stage == "fine":
-            tv_loss_dict = gaussians.compute_regulation(hyper.time_smoothness_weight, hyper.l1_time_planes, hyper.plane_tv_weight, hyper.l2_plane_reg)
+            tv_loss_dict = gaussians.compute_regulation(hyper.time_smoothness_weight, hyper.l1_time_planes, hyper.l2_time_planes, hyper.plane_tv_weight)
             loss += tv_loss_dict['total_reg']
         else:
             tv_loss_dict = defaultdict(int) # assume to be 0 for coarse
@@ -199,12 +199,11 @@ def scene_reconstruction(
             if iteration % 500 == 0:
                 infos = {
                     "Loss": round(ema_loss_for_log, 7),
-                    "psnr": round(psnr_.detach().cpu().numpy().item(), 2),
+                    "psnr": round(psnr_.item(), 2),
                     "point": total_point,
-                    "time_reg": round(tv_loss_dict['time_reg'], 7),
-                    "plane_reg": round(tv_loss_dict['plane_reg'], 7),
-                    "l1_time_reg": round(tv_loss_dict['l1_time_reg'], 7)
                 }
+                for aux_loss_name, aux_loss_val in tv_loss_dict.items():
+                    infos[aux_loss_name] = aux_loss_val.item()
                 progress_bar.set_postfix({k: str(v) for k, v in infos.items()})
                 progress_bar.update(500)
                 if use_wandb:
@@ -267,7 +266,7 @@ def scene_reconstruction(
                 gaussians.optimizer.step()
                 gaussians.optimizer.zero_grad(set_to_none = True)
 
-def training(dataset, hyper, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, expname, use_wandb, weighted_loss):
+def training(dataset, hyper, opt, pipe, checkpoint, debug_from, expname, use_wandb, weighted_loss):
     prepare_output_and_logger(expname)
     gaussians = GaussianModel(dataset.sh_degree, hyper)
     dataset.model_path = args.model_path
@@ -275,14 +274,12 @@ def training(dataset, hyper, opt, pipe, testing_iterations, saving_iterations, c
     scene = Scene(dataset, gaussians)
     timer.start()
     scene_reconstruction(
-        dataset, opt, hyper, pipe, testing_iterations, saving_iterations,
-        checkpoint_iterations, checkpoint, debug_from, gaussians,
+        dataset, opt, hyper, pipe, checkpoint, debug_from, gaussians,
         scene, "coarse", opt.coarse_iterations, timer,
         use_wandb, save_video=True, save_images=False, save_pointclound=True, weighted_loss=weighted_loss
     )
     scene_reconstruction(
-        dataset, opt, hyper, pipe, testing_iterations, saving_iterations,
-        checkpoint_iterations, checkpoint, debug_from, gaussians,
+        dataset, opt, hyper, pipe, checkpoint, debug_from, gaussians,
         scene, "fine", opt.iterations, timer,
         use_wandb, save_video=True, save_images=False, save_pointclound=True, weighted_loss=weighted_loss
     )
@@ -317,29 +314,23 @@ if __name__ == "__main__":
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
     parser.add_argument('--wandb', action='store_true', default=False)
-    parser.add_argument("--test_iterations", nargs="+", type=int, default=[3000 * i for i in range(100)])
-    parser.add_argument("--save_iterations", nargs="+", type=int, default=[1000, 3000, 4000, 5000, 6000, 7_000, 9000, 10000, 12000, 14000, 20000, 30_000, 45000, 60000])
     parser.add_argument("--quiet", action="store_true", default=False)
     parser.add_argument("--weighted_loss", action="store_true", default=False) # whether we pick random camera, or pick camera with higher prob for higher loss
-    parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)
     parser.add_argument("--expname", type=str, default = "")
     parser.add_argument("--configs", type=str, default = "")
     parser.add_argument("--data_path", type=str, nargs='+', default = [])
     parser.add_argument("--n_train_cams", type=int, nargs='+', default = [])
     parser.add_argument("--n_test_cams", type=int, nargs='+', default = [])
-    parser.add_argument("--l2_plane_reg", action='store_true', default = False)
     
     args = parser.parse_args()
     args.source_path = args.data_path
     lp.n_train_cams = [int(val) for val in args.n_train_cams]
     lp.n_test_cams = [int(val) for val in args.n_test_cams]
-    op.l2_plane_reg = bool(args.l2_plane_reg)
+    # op.l2_plane_reg = bool(args.l2_plane_reg)
 
     assert len(args.n_train_cams) == len(args.n_test_cams) == len(args.data_path)
 
-
-    args.save_iterations.append(args.iterations)
     if args.configs:
         import mmcv
         from utils.params_utils import merge_hparams
@@ -359,9 +350,6 @@ if __name__ == "__main__":
         hp.extract(args),
         op.extract(args),
         pp.extract(args),
-        args.test_iterations,
-        args.save_iterations,
-        args.checkpoint_iterations,
         args.start_checkpoint,
         args.debug_from,
         args.expname,

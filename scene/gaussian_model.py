@@ -25,6 +25,7 @@ from utils.general_utils import strip_symmetric, build_scaling_rotation
 # from utils.point_utils import addpoint, combine_pointcloud, downsample_point_cloud_open3d, find_indices_in_A
 from scene.deformation import deform_network
 from scene.regulation import compute_plane_smoothness
+from collections import defaultdict
 
 class GaussianModel:
 
@@ -675,7 +676,7 @@ class GaussianModel:
         pass
 
     
-    def _l1_regulation(self, use_l2=False):
+    def _l1_regulation(self):
         # model.grids is 6 x [1, rank * F_dim, reso, reso]
         multi_res_grids = self._deformation.deformation_net.grid.grids
 
@@ -687,22 +688,35 @@ class GaussianModel:
                 # These are the spatiotemporal grids
                 spatiotemporal_grids = [2, 4, 5]
             for grid_id in spatiotemporal_grids:
-                if use_l2:
-                    total += torch.square(1 - grids[grid_id]).mean()
-                else:
-                    total += torch.abs(1 - grids[grid_id]).mean()
+                total += torch.abs(1 - grids[grid_id]).mean()
+        return total
+
+    def _l2_regulation(self):
+        # model.grids is 6 x [1, rank * F_dim, reso, reso]
+        multi_res_grids = self._deformation.deformation_net.grid.grids
+
+        total = 0.0
+        for grids in multi_res_grids:
+            if len(grids) == 3:
+                continue
+            else:
+                # These are the spatiotemporal grids
+                spatiotemporal_grids = [2, 4, 5]
+            for grid_id in spatiotemporal_grids:
+                total += torch.square(1 - grids[grid_id]).mean()
         return total
     
     # CALLED AT FINE STAGE ONLY, OUTPUT ADDED TO LOSS
-    def compute_regulation(self, time_smoothness_weight, l1_time_planes_weight, plane_tv_weight, l2_plane_reg = False):
+    def compute_regulation(self, time_smoothness_weight, l1_time_planes_weight, l2_time_planes_weight, plane_tv_weight):
         time_reg = time_smoothness_weight * self._time_regulation()
         plane_reg = plane_tv_weight * self._plane_regulation()
-        l1_time_reg = l1_time_planes_weight * self._l1_regulation(use_l2=l2_plane_reg)
-        reg_loss = dict(
-            time_reg = time_reg.item(),
-            plane_reg = plane_reg.item(),
-            l1_time_reg = l1_time_reg.item(),
-            total_reg = time_reg + plane_reg + l1_time_reg
-        )
-        return reg_loss
+        l1_time_reg = l1_time_planes_weight * self._l1_regulation()
+        l2_time_reg = l2_time_planes_weight * self._l2_regulation()
+        reg_loss_dict = defaultdict(int)
+        reg_loss_dict['time_reg'] = time_reg
+        reg_loss_dict['plane_reg'] = plane_reg
+        reg_loss_dict['l1_time_reg'] = l1_time_reg
+        reg_loss_dict['l2_time_reg'] = l2_time_reg
+        reg_loss_dict['total_reg'] = time_reg + plane_reg + l1_time_reg + l2_time_reg
+        return reg_loss_dict
 # CUDA_VISIBLE_DEVICES=2 nohup python train.py --data_path data_new/scene2_force1 data_new/scene2_force2 --n_train_cams 25 50 --n_test_cams 2 2 --expname scene2_morecam2 --configs arguments/dnerf/force.py --wandb > scene2_morecam2.out

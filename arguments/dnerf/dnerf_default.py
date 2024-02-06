@@ -19,7 +19,8 @@ ModelHiddenParams = dict(
     net_width = 64, # defualt: 64
     plane_tv_weight = 0.0001,
     time_smoothness_weight = 0.01,
-    l1_time_planes =  0.0001,
+    l1_time_planes = 0.0001,
+    l2_time_planes = 0.0001,
     weight_decay_iteration=0,
     bounds=1.6
 )
