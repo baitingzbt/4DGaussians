@@ -394,7 +394,7 @@ def readForceSyntheticInfo(
     def helper(path: str, i: int, split: str, force_idx: int) -> List[CameraInfo]:
         # force_setting is id of force
         cam_path = os.path.join(path, f'{split}/cam_{i}')
-        return readCamerasFromTransforms(cam_path, "transforms.json", white_background, extension, timestamp_mapper, force_idx)
+        return readCamerasFromTransforms(cam_path, "transforms.json", white_background, '', timestamp_mapper, force_idx)
 
     # train_cams = 50 if multi_cam else 1 # max: 100
     # test_cams = 2 if multi_cam else 1 # max: 20
@@ -412,7 +412,7 @@ def readForceSyntheticInfo(
 
         for i in tqdm(range(train_cams), desc='Generating Video Transforms'):
             cam_path = os.path.join(_path, f'train/cam_{i}')
-            video_cam_infos += generateCamerasFromTransforms(cam_path, 'transforms.json', extension, max_time)
+            video_cam_infos += generateCamerasFromTransforms(cam_path, 'transforms.json', '', max_time)
         
     if not eval:
         train_cam_infos.extend(test_cam_infos)

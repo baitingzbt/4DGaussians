@@ -63,9 +63,11 @@ def init_grid_param(
     coo_combs = list(itertools.combinations(range(in_dim), grid_nd))
     grid_coefs = nn.ParameterList()
     for ci, coo_comb in enumerate(coo_combs):
-        new_grid_coef = nn.Parameter(torch.empty(
-            [1, out_dim] + [reso[cc] for cc in coo_comb[::-1]]
-        ))
+        new_grid_coef = nn.Parameter(
+            torch.empty(
+                [1, out_dim] + [reso[cc] for cc in coo_comb[::-1]]
+            )
+        )
         # x, y, z, time, force;
         # below means if time or force exist in current coo_comb, initialize those planes to 1
         if max(coo_comb) >= 3:

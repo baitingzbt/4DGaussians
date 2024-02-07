@@ -42,34 +42,34 @@ class Scene:
         self.test_cameras = {}
         self.video_cameras = {}
 
-        if isinstance(args.source_path, list):
-            # quick fix, use multiple forces together
-            print("Found force transforms.json file, assuming Blender data set for MANY force")
-            scene_info = sceneLoadTypeCallbacks["Force"](args.source_path, args.n_train_cams, args.n_test_cams, args.white_background, args.eval, args.extension)
-            dataset_type="blender"
-        elif os.path.exists(os.path.join(args.source_path, "sparse")):
-            scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval, args.llffhold)
-            dataset_type="colmap"
-        elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
-            print("Found transforms_train.json file, assuming Blender data set!")
-            scene_info = sceneLoadTypeCallbacks["Blender"](args.source_path, args.white_background, args.eval, args.extension)
-            dataset_type="blender"
-        # detects if there is a cam_0, use single-force
-        elif os.path.exists(os.path.join(args.source_path, 'train', 'cam_0', "transforms.json")):
-            print("Found force transforms.json file, assuming Blender data set for 1 force")
-            scene_info = sceneLoadTypeCallbacks["Force"](args.source_path, args.white_background, args.eval, args.extension, args.multi_cam)
-            dataset_type="blender"
-        elif os.path.exists(os.path.join(args.source_path, "poses_bounds.npy")):
-            scene_info = sceneLoadTypeCallbacks["dynerf"](args.source_path, args.white_background, args.eval)
-            dataset_type="dynerf"
-        elif os.path.exists(os.path.join(args.source_path,"dataset.json")):
-            scene_info = sceneLoadTypeCallbacks["nerfies"](args.source_path, False, args.eval)
-            dataset_type="nerfies"
-        elif os.path.exists(os.path.join(args.source_path,"train_meta.json")):
-            scene_info = sceneLoadTypeCallbacks["PanopticSports"](args.source_path)
-            dataset_type="PanopticSports"
-        else:
-            assert False, "Could not recognize scene type!"
+        # if isinstance(args.source_path, list):
+        # quick fix, use multiple forces together
+        print("Found force transforms.json file, assuming Blender data set for MANY force")
+        scene_info = sceneLoadTypeCallbacks["Force"](args.source_path, args.n_train_cams, args.n_test_cams, args.white_background, args.eval, args.extension)
+        dataset_type="blender"
+        # elif os.path.exists(os.path.join(args.source_path, "sparse")):
+        #     scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval, args.llffhold)
+        #     dataset_type="colmap"
+        # elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
+        #     print("Found transforms_train.json file, assuming Blender data set!")
+        #     scene_info = sceneLoadTypeCallbacks["Blender"](args.source_path, args.white_background, args.eval, args.extension)
+        #     dataset_type="blender"
+        # # detects if there is a cam_0, use single-force
+        # elif os.path.exists(os.path.join(args.source_path, 'train', 'cam_0', "transforms.json")):
+        #     print("Found force transforms.json file, assuming Blender data set for 1 force")
+        #     scene_info = sceneLoadTypeCallbacks["Force"](args.source_path, args.white_background, args.eval, args.extension, args.multi_cam)
+        #     dataset_type="blender"
+        # elif os.path.exists(os.path.join(args.source_path, "poses_bounds.npy")):
+        #     scene_info = sceneLoadTypeCallbacks["dynerf"](args.source_path, args.white_background, args.eval)
+        #     dataset_type="dynerf"
+        # elif os.path.exists(os.path.join(args.source_path,"dataset.json")):
+        #     scene_info = sceneLoadTypeCallbacks["nerfies"](args.source_path, False, args.eval)
+        #     dataset_type="nerfies"
+        # elif os.path.exists(os.path.join(args.source_path,"train_meta.json")):
+        #     scene_info = sceneLoadTypeCallbacks["PanopticSports"](args.source_path)
+        #     dataset_type="PanopticSports"
+        # else:
+        #     assert False, "Could not recognize scene type!"
             
         scene_info: SceneInfo
         self.maxtime = scene_info.maxtime
