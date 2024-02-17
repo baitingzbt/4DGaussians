@@ -75,11 +75,19 @@ def render(
         scales = pc._scaling
         rotations = pc._rotation
 
-    if stage.startswith("coarse"):
+    if "coarse" in stage:
         means3D_final, scales_final, rotations_final, opacity_final, shs_final = means3D, scales, rotations, opacity, shs
+        momentum_reg = torch.tensor(0.0)
     else:
         means3D_final, scales_final, rotations_final, opacity_final, shs_final \
             = pc._deformation.forward(means3D, scales, rotations, opacity, shs, time, force)
+        # use magic number 1/39 for time-step difference
+        time_prev = torch.ones_like(time) * (viewpoint_camera.time - 1/39)
+        time_nxt = torch.ones_like(time) * (viewpoint_camera.time + 1/39)
+        # use only means now
+        means3D_prev = pc._deformation.forward(means3D, scales, rotations, opacity, shs, time_prev, force)[0]
+        means3D_nxt = pc._deformation.forward(means3D, scales, rotations, opacity, shs, time_nxt, force)[0]
+        momentum_reg = torch.abs(means3D_nxt + means3D_prev - 2 * means3D_final).mean()
 
     scales_final = pc.scaling_activation(scales_final)
     rotations_final = pc.rotation_activation(rotations_final)
@@ -110,5 +118,5 @@ def render(
         cov3D_precomp = cov3D_precomp
     )
 
-    return rendered_image, screenspace_points, radii > 0, radii, depth # , hidden
+    return rendered_image, screenspace_points, radii > 0, radii, depth, momentum_reg # , hidden
 

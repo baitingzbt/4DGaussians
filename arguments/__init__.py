@@ -62,9 +62,8 @@ class ModelParams(ParamGroup):
 
     def extract(self, args):
         g = super().extract(args)
-        for p in g.source_path:
-            print(p)
-        g.source_path = [os.path.abspath(p) for p in g.source_path]
+        g.data_path_train = [os.path.abspath(p) for p in g.data_path_train]
+        g.data_path_test = [os.path.abspath(p) for p in g.data_path_test]
         return g
 
 class PipelineParams(ParamGroup):
@@ -90,11 +89,11 @@ class ModelHiddenParams(ParamGroup):
         self.l1_time_planes = 0.0001
         self.l2_time_planes = 0.0001
         self.kplanes_config = {
-                             'grid_dimensions': 2,
-                             'input_coordinate_dim': 4,
-                             'output_coordinate_dim': 32,
-                             'resolution': [64, 64, 64, 25]
-                            }
+            'grid_dimensions': 2,
+            'input_coordinate_dim': 4,
+            'output_coordinate_dim': 32,
+            'resolution': [64, 64, 64, 25]
+        }
         self.multires = [1, 2, 4, 8]
         self.no_dx=False
         self.no_grid=False

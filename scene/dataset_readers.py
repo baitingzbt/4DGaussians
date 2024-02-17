@@ -54,7 +54,6 @@ class SceneInfo(NamedTuple):
     point_cloud: BasicPointCloud
     train_cameras: List[CameraInfo]
     test_cameras: List[CameraInfo]
-    video_cameras: List[CameraInfo]
     nerf_normalization: dict
     ply_path: str
     maxtime: int
@@ -197,7 +196,6 @@ def readColmapSceneInfo(path, images, eval, llffhold=8):
     scene_info = SceneInfo(point_cloud=pcd,
                            train_cameras=train_cam_infos,
                            test_cameras=test_cam_infos,
-                           video_cameras=train_cam_infos,
                            maxtime=0,
                            nerf_normalization=nerf_normalization,
                            ply_path=ply_path)
@@ -314,6 +312,50 @@ def readCamerasFromTransforms(
         )
     return cam_infos
 
+# use with cautious, lots of special case and magic numbers to maximize reading speed
+def readCamerasFromShortTransforms(
+    path: str,
+    transformsfile: str,
+    white_background: bool,
+    extension: str,
+    mapper: Dict,
+    force_idx: int,
+) -> List[CameraInfo]:
+    transformsfile = f"{transformsfile[:-5]}_short.json"
+    cam_infos = []
+    with open(os.path.join(path, transformsfile)) as json_file:
+        contents: Dict = json.load(json_file)
+    fovx = contents['camera_angle_x']
+    matrix = np.linalg.inv(np.array(contents["transform_matrix"]))
+    R = -np.transpose(matrix[:3, :3])
+    R[:, 0] = -R[:, 0]
+    T = -matrix[:3, 3]
+    H, W = 800, 800
+    fovy = focal2fov(fov2focal(fovx, H), W)
+    force = np.array(contents['force'])
+    bg = np.array([1, 1, 1]) if white_background else np.array([0, 0, 0])
+    for idx, frame in enumerate(contents["frames"]):
+        if idx >= MAX_FRAME:
+            break
+        cam_name = os.path.join(path, frame["file_path"] + extension)
+        time = mapper[frame["time"]]
+        image_path = os.path.join(path, cam_name)
+        image_name = Path(cam_name).stem
+        image = Image.open(image_path)
+        im_data = np.array(image.convert("RGBA"))
+        norm_data = im_data / 255.0
+        arr = norm_data[:, :, :3] * norm_data[:, :, 3:4] + bg * (1 - norm_data[:, :, 3:4])
+        # image = Image.fromarray(np.array(arr * 255.0, dtype=np.byte), "RGB")
+        # image = PILtoTorch(image, (H, W))
+        arr_tensor = torch.tensor(arr, dtype=torch.float32).permute(2, 0, 1)
+        cam_infos.append(
+            CameraInfo(
+                uid=idx, R=R, T=T, FovY=fovy, FovX=fovx, image=arr_tensor, image_path=image_path,
+                image_name=image_name, width=W, height=H, time=time, mask=None, force=force, force_idx=force_idx
+            )
+        )
+    return cam_infos
+
 
 def read_timeline(path):
     with open(os.path.join(path, "transforms_train.json")) as json_file:
@@ -327,93 +369,88 @@ def read_timeline(path):
     return timestamp_mapper, max_time_float
 
 
-def read_force_timeline(paths: List[str]):
+def read_force_timeline(paths_train: List[str], paths_test: List[str]):
     # read from each force's subfolder
     time_lines = []
-    for path in paths:
+    for path in paths_train:
         with open(os.path.join(path, 'train', 'cam_0', "transforms.json")) as json_file:
             train_json = json.load(json_file)
+        time_lines += [frame["time"] for frame in train_json["frames"][:MAX_FRAME]]
+    for path in paths_test:
         with open(os.path.join(path, 'test', 'cam_0', "transforms.json")) as json_file:
             test_json = json.load(json_file)
-        time_lines += [frame["time"] for frame in train_json["frames"][:MAX_FRAME]] \
-            + [frame["time"] for frame in test_json["frames"][:MAX_FRAME]]
+        time_lines += [frame["time"] for frame in test_json["frames"][:MAX_FRAME]]
     time_lines = list(sorted(set(time_lines)))
     max_time_float = max(time_lines)
     timestamp_mapper = {t: t / max_time_float for t in time_lines}
     return timestamp_mapper, max_time_float
 
-def readNerfSyntheticInfo(path, white_background, eval, extension=".png"):
-    timestamp_mapper, max_time = read_timeline(path)
-    print("Reading Training Transforms")
-    train_cam_infos = readCamerasFromTransforms(path, "transforms_train.json", white_background, extension, timestamp_mapper)
-    print("Reading Test Transforms")
-    test_cam_infos = readCamerasFromTransforms(path, "transforms_test.json", white_background, extension, timestamp_mapper)
-    print("Generating Video Transforms")
-    video_cam_infos = generateCamerasFromTransforms(path, "transforms_train.json", extension, max_time)
-    if not eval:
-        train_cam_infos.extend(test_cam_infos)
-        test_cam_infos = []
+# # commented out below to exclude ambiguity. We use Force specifically, not Nerf reader
 
-    nerf_normalization = getNerfppNorm(train_cam_infos)
+# def readNerfSyntheticInfo(path, white_background, eval, extension=".png"):
+#     timestamp_mapper, max_time = read_timeline(path)
+#     print("Reading Training Transforms")
+#     train_cam_infos = readCamerasFromTransforms(path, "transforms_train.json", white_background, extension, timestamp_mapper)
+#     print("Reading Test Transforms")
+#     test_cam_infos = readCamerasFromTransforms(path, "transforms_test.json", white_background, extension, timestamp_mapper)
+#     print("Generating Video Transforms")
+#     video_cam_infos = generateCamerasFromTransforms(path, "transforms_train.json", extension, max_time)
+#     if not eval:
+#         train_cam_infos.extend(test_cam_infos)
+#         test_cam_infos = []
 
-    ply_path = os.path.join(path, "fused.ply")
-    if not os.path.exists(ply_path):
-        # Since this data set has no colmap data, we start with random points
-        num_pts = 2000
-        print(f"Generating random point cloud ({num_pts})...")
+#     nerf_normalization = getNerfppNorm(train_cam_infos)
 
-        # We create random points inside the bounds of the synthetic Blender scenes
-        xyz = np.random.random((num_pts, 3)) * 2.6 - 1.3
-        shs = np.random.random((num_pts, 3)) / 255.0
-        pcd = BasicPointCloud(points=xyz, colors=SH2RGB(shs), normals=np.zeros((num_pts, 3)))
-    else:
-        pcd = fetchPly(ply_path)
+#     ply_path = os.path.join(path, "fused.ply")
+#     if not os.path.exists(ply_path):
+#         # Since this data set has no colmap data, we start with random points
+#         num_pts = 2000
+#         print(f"Generating random point cloud ({num_pts})...")
+
+#         # We create random points inside the bounds of the synthetic Blender scenes
+#         xyz = np.random.random((num_pts, 3)) * 2.6 - 1.3
+#         shs = np.random.random((num_pts, 3)) / 255.0
+#         pcd = BasicPointCloud(points=xyz, colors=SH2RGB(shs), normals=np.zeros((num_pts, 3)))
+#     else:
+#         pcd = fetchPly(ply_path)
 
 
-    scene_info = SceneInfo(
-        point_cloud=pcd,
-        train_cameras=train_cam_infos,
-        test_cameras=test_cam_infos,
-        video_cameras=video_cam_infos,
-        nerf_normalization=nerf_normalization,
-        ply_path=ply_path,
-        maxtime=max_time
-    )
-    return scene_info
+#     scene_info = SceneInfo(
+#         point_cloud=pcd,
+#         train_cameras=train_cam_infos,
+#         test_cameras=test_cam_infos,
+#         video_cameras=video_cam_infos,
+#         nerf_normalization=nerf_normalization,
+#         ply_path=ply_path,
+#         maxtime=max_time
+#     )
+#     return scene_info
 
 def readForceSyntheticInfo(
-    paths: List[str],
+    paths_train: List[str],
+    paths_test: List[str],
     n_train_cams: List[int],
     n_test_cams: List[int],
     white_background,
     eval,
-    extension="",
 ):
-
-    timestamp_mapper, max_time = read_force_timeline(paths)
+    paths = paths_train + paths_test
+    timestamp_mapper, max_time = read_force_timeline(paths_train, paths_test)
     def helper(path: str, i: int, split: str, force_idx: int) -> List[CameraInfo]:
         # force_setting is id of force
         cam_path = os.path.join(path, f'{split}/cam_{i}')
-        return readCamerasFromTransforms(cam_path, "transforms.json", white_background, '', timestamp_mapper, force_idx)
-
-    # train_cams = 50 if multi_cam else 1 # max: 100
-    # test_cams = 2 if multi_cam else 1 # max: 20
+        # readCamerasFromTransforms, readCamerasFromShortTransforms
+        return readCamerasFromShortTransforms(cam_path, "transforms.json", white_background, '', timestamp_mapper, force_idx)
 
     train_cam_infos = []
     test_cam_infos = []
-    video_cam_infos = []
-    for force_idx, (_path, train_cams, test_cams) in enumerate(zip(paths, n_train_cams, n_test_cams)):
-        print(f"\t ----> Reading force data from path = {_path} <----")
-        for i in tqdm(range(train_cams), desc='Reading Training from:'):
+    for force_idx, (_path, train_cams) in enumerate(zip(paths_train, n_train_cams)):
+        for i in tqdm(range(train_cams), desc='Reading Train'):
             train_cam_infos += helper(_path, i, 'train', force_idx)
-
-        for i in tqdm(range(test_cams), desc='Reading Test Transforms'):
+    for force_idx, (_path, test_cams) in enumerate(zip(paths_test, n_test_cams)):
+        for i in tqdm(range(test_cams), desc='Reading Test'):
             test_cam_infos += helper(_path, i, 'test', force_idx)
 
-        for i in tqdm(range(train_cams), desc='Generating Video Transforms'):
-            cam_path = os.path.join(_path, f'train/cam_{i}')
-            video_cam_infos += generateCamerasFromTransforms(cam_path, 'transforms.json', '', max_time)
-        
     if not eval:
         train_cam_infos.extend(test_cam_infos)
         test_cam_infos = []
@@ -433,7 +470,6 @@ def readForceSyntheticInfo(
         point_cloud=pcd,
         train_cameras=train_cam_infos,
         test_cameras=test_cam_infos,
-        video_cameras=video_cam_infos,
         nerf_normalization=nerf_normalization,
         ply_path=ply_path,
         maxtime=max_time
@@ -481,7 +517,6 @@ def readHyperDataInfos(datadir,use_bg_points,eval):
     scene_info = SceneInfo(point_cloud=pcd,
                            train_cameras=train_cam_infos,
                            test_cameras=test_cam_infos,
-                           video_cameras=video_cam_infos,
                            nerf_normalization=nerf_normalization,
                            ply_path=ply_path,
                            maxtime=max_time
@@ -562,7 +597,6 @@ def readdynerfInfo(datadir,use_bg_points,eval):
     scene_info = SceneInfo(point_cloud=pcd,
                            train_cameras=train_dataset,
                            test_cameras=test_dataset,
-                           video_cameras=val_cam_infos,
                            nerf_normalization=nerf_normalization,
                            ply_path=ply_path,
                            maxtime=300
@@ -681,7 +715,6 @@ def readPanopticSportsinfos(datadir):
     scene_info = SceneInfo(point_cloud=pcd,
                            train_cameras=train_cam_infos,
                            test_cameras=test_cam_infos,
-                           video_cameras=test_cam_infos,
                            nerf_normalization=nerf_normalization,
                            ply_path=ply_path,
                            maxtime=max_time,
@@ -689,10 +722,10 @@ def readPanopticSportsinfos(datadir):
     return scene_info
 
 sceneLoadTypeCallbacks = {
-    "Colmap": readColmapSceneInfo,
-    "Blender" : readNerfSyntheticInfo,
+    # "Colmap": readColmapSceneInfo,
+    # "Blender" : readNerfSyntheticInfo,
     "Force" : readForceSyntheticInfo,
-    "dynerf" : readdynerfInfo,
-    "nerfies": readHyperDataInfos,  # NeRFies & HyperNeRF dataset proposed by [https://github.com/google/hypernerf/releases/tag/v0.1]
-    "PanopticSports" : readPanopticSportsinfos
+    # "dynerf" : readdynerfInfo,
+    # "nerfies": readHyperDataInfos,  # NeRFies & HyperNeRF dataset proposed by [https://github.com/google/hypernerf/releases/tag/v0.1]
+    # "PanopticSports" : readPanopticSportsinfos
 }

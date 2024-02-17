@@ -670,8 +670,10 @@ class GaussianModel:
                 total += compute_plane_smoothness(grids[grid_id])
         return total
     
-    def _force_regulation(self):
-        pass
+    def _momentum_regulation(self):
+        self.get_features
+        # l_momentum = all_means_3D_deform[2,:,:] - 2*all_means_3D_deform[1,:,:] + all_means_3D_deform[0,:,:]
+        # l_momentum = torch.linalg.norm(l_momentum,dim=-1,ord=1).mean() # mean
 
     
     def _l1_regulation(self):

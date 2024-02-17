@@ -40,12 +40,15 @@ class Scene:
 
         self.train_cameras = {}
         self.test_cameras = {}
-        self.video_cameras = {}
 
         # if isinstance(args.source_path, list):
         # quick fix, use multiple forces together
         print("Found force transforms.json file, assuming Blender data set for MANY force")
-        scene_info = sceneLoadTypeCallbacks["Force"](args.source_path, args.n_train_cams, args.n_test_cams, args.white_background, args.eval, args.extension)
+        scene_info = sceneLoadTypeCallbacks["Force"](
+            args.data_path_train, args.data_path_test,
+            args.n_train_cams, args.n_test_cams,
+            args.white_background, args.eval
+        )
         dataset_type="blender"
         # elif os.path.exists(os.path.join(args.source_path, "sparse")):
         #     scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval, args.llffhold)
@@ -79,15 +82,10 @@ class Scene:
         self.train_camera = FourDGSdataset(scene_info.train_cameras, args, dataset_type)
         print("Loading Test Cameras")
         self.test_camera = FourDGSdataset(scene_info.test_cameras, args, dataset_type)
-        print("Loading Video Cameras")
-        self.video_camera = FourDGSdataset(scene_info.video_cameras, args, dataset_type)
 
-        # self.video_camera = cameraList_from_camInfos(scene_info.video_cameras,-1,args)
         xyz_max = scene_info.point_cloud.points.max(axis=0)
         xyz_min = scene_info.point_cloud.points.min(axis=0)
         if args.add_points:
-            print("add points.")
-            # breakpoint()
             scene_info = scene_info._replace(point_cloud=add_points(scene_info.point_cloud, xyz_max=xyz_max, xyz_min=xyz_min))
         self.gaussians._deformation.deformation_net.set_aabb(xyz_max,xyz_min)
         if self.loaded_iter:
@@ -110,11 +108,8 @@ class Scene:
         self.gaussians.save_ply(os.path.join(point_cloud_path, "point_cloud.ply"))
         self.gaussians.save_deformation(point_cloud_path)
 
-    def getTrainCameras(self, scale=1.0):
+    def getTrainCameras(self):
         return self.train_camera
 
-    def getTestCameras(self, scale=1.0):
+    def getTestCameras(self):
         return self.test_camera
-    
-    def getVideoCameras(self, scale=1.0):
-        return self.video_camera

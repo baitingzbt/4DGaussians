@@ -22,34 +22,25 @@ class FourDGSdataset(Dataset):
         self.dataset_type=dataset_type
 
     def __getitem__(self, index):
-        if self.dataset_type == 'PanopticSports':
-            return self.dataset[index]
 
-        if self.dataset_type in ['blender']:
-            caminfo: CameraInfo = self.dataset[index]
-            image = caminfo.image
-            R, T = caminfo.R, caminfo.T
-            FovX, FovY = caminfo.FovX, caminfo.FovY
-            time = caminfo.time
-            mask = caminfo.mask
-            force = caminfo.force
-            force_idx = caminfo.force_idx
-            if time != 0:
-                prev_caminfo: CameraInfo = self.dataset[index-1]
-                prev_image = prev_caminfo.image
-                prev_time = prev_caminfo.time
-            else:
-                prev_image = torch.zeros_like(image)
-                prev_time = -1
-            # print(f"-----> time = {time}, prev_time = {prev_time}, diff = {prev_time - time}")
-        else:
-            image, w2c, time = self.dataset[index]
-            R,T = w2c
-            FovX = focal2fov(self.dataset.focal[0], image.shape[2])
-            FovY = focal2fov(self.dataset.focal[0], image.shape[1])
-            mask=None
+        caminfo: CameraInfo = self.dataset[index]
+        image = caminfo.image
+        R, T = caminfo.R, caminfo.T
+        FovX, FovY = caminfo.FovX, caminfo.FovY
+        time = caminfo.time
+        mask = caminfo.mask
+        force = caminfo.force
+        force_idx = caminfo.force_idx
+        # if time != 0:
+        #     prev_caminfo: CameraInfo = self.dataset[index-1]
+        #     prev_image = prev_caminfo.image
+        #     prev_time = prev_caminfo.time
+        # else:
+        #     prev_image = torch.zeros_like(image)
+        #     prev_time = -1
+        # print(f"-----> time = {time}, prev_time = {prev_time}, diff = {prev_time - time}")
         return Camera(
-            colmap_id=index, R=R, T=T, FoVx=FovX, FoVy=FovY, prev_image=prev_image,
+            colmap_id=index, R=R, T=T, FoVx=FovX, FoVy=FovY, # prev_image=prev_image,
             image=image, gt_alpha_mask=None, image_name=f"{index}",
             uid=index, data_device=torch.device("cuda"), time=time, mask=mask, force=force, force_idx=force_idx
         )
