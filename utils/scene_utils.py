@@ -10,8 +10,12 @@ from scene.cameras import Camera
 from gaussian_renderer.renderer import render
 from scene import Scene
 import wandb
-from typing import List, Union
+from typing import List, Union, Tuple
 from .image_utils import psnr_np
+
+FONT = ImageFont.truetype('./utils/TIMES.TTF', size=40) # 选择字体和字体大小
+TXT_COLOR = (255, 0, 0)  # 白色
+LABEL1_POS = (10, 10) # 选择标签的位置（左上角坐标
 
 @torch.no_grad()
 def render_training_image(
@@ -27,32 +31,26 @@ def render_training_image(
     save_pointclound: bool = False,
     save_images: bool = False,
     use_wandb: bool = False
-) -> None:
+) -> Tuple[float, float]:
     gaussians._deformation.eval()
     gaussians._deformation.deformation_net.eval()
     times = round(time_now / 60, 2)
     label2 = f"time: {times} mins"
-    font = ImageFont.truetype('./utils/TIMES.TTF', size=40) # 选择字体和字体大小
-    text_color = (255, 0, 0)  # 白色
-    label1_position = (10, 10) # 选择标签的位置（左上角坐标）
     all_psnr = []
+    all_test_loss = []
     def render_helper(viewpoint: Camera, path: str = None) -> np.ndarray:
         image = render(viewpoint, gaussians, pipe, background, stage=stage)[0]
         gt_np = viewpoint.original_image.permute(1, 2, 0).cpu().numpy()
         image_np = image.permute(1, 2, 0).cpu().numpy()  # 转换通道顺序为 (H, W, 3)
+        all_test_loss.append(np.mean(np.square(gt_np - image_np)))
         all_psnr.append(psnr_np(image_np, gt_np))
-        # depth_np = depth.permute(1, 2, 0).cpu().numpy()
-        # depth_np /= depth_np.max()
-        # depth_np = np.repeat(depth_np, 3, axis=2)
         label1 = f"stage:{stage},iter:{iteration}\nframe_t:{round(viewpoint.time, 2)}\ninten:{viewpoint.force[-1]}"
         image_np = np.concatenate((gt_np, image_np), axis=1)
         image_with_labels = Image.fromarray((np.clip(image_np, 0, 1) * 255).astype('uint8'))  # 转换为8位图像
-        # 创建PIL图像对象的副本以绘制标签
         draw1 = ImageDraw.Draw(image_with_labels)
         label2_position = (image_with_labels.width - 100 - len(label2) * 10, 10)  # 右上角坐标
-        # 在图像上添加标签
-        draw1.text(label1_position, label1, fill=text_color, font=font)
-        draw1.text(label2_position, label2, fill=text_color, font=font)
+        draw1.text(LABEL1_POS, label1, fill=TXT_COLOR, font=FONT)
+        draw1.text(label2_position, label2, fill=TXT_COLOR, font=FONT)
         if save_images:
             image_with_labels.save(path)
         image_with_label_arr = np.array(image_with_labels)
@@ -71,8 +69,9 @@ def render_training_image(
         image_with_label_arr = render_helper(viewpoint, image_save_path)
         all_renders.append(image_with_label_arr)
     avg_psnr = np.round(np.mean(np.array(all_psnr)), 2)
+    avg_l1 = np.mean(np.array(all_test_loss))
     if save_video:
-        video_path = os.path.join(image_path, f'{iteration}_{avg_psnr}.mp4')
+        video_path = os.path.join(image_path, f'{iteration}.mp4')
         clip = ImageSequenceClip(all_renders, with_mask=False, fps=30)
         clip.write_videofile(video_path, logger=None)
         if use_wandb:
@@ -87,6 +86,7 @@ def render_training_image(
     
     gaussians._deformation.train()
     gaussians._deformation.deformation_net.train()
+    return avg_l1, avg_psnr
     
 
 def visualize_and_save_point_cloud(point_cloud, R, T, filename):

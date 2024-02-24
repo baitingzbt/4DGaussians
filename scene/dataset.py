@@ -1,13 +1,7 @@
 from torch.utils.data import Dataset
 from scene.cameras import Camera
 from scene.dataset_readers import CameraInfo
-import numpy as np
-from utils.general_utils import PILtoTorch
-from utils.graphics_utils import fov2focal, focal2fov
 import torch
-from utils.camera_utils import loadCam
-from utils.graphics_utils import focal2fov
-from typing import List
 
 class FourDGSdataset(Dataset):
 
@@ -24,13 +18,6 @@ class FourDGSdataset(Dataset):
     def __getitem__(self, index):
 
         caminfo: CameraInfo = self.dataset[index]
-        image = caminfo.image
-        R, T = caminfo.R, caminfo.T
-        FovX, FovY = caminfo.FovX, caminfo.FovY
-        time = caminfo.time
-        mask = caminfo.mask
-        force = caminfo.force
-        force_idx = caminfo.force_idx
         # if time != 0:
         #     prev_caminfo: CameraInfo = self.dataset[index-1]
         #     prev_image = prev_caminfo.image
@@ -40,9 +27,10 @@ class FourDGSdataset(Dataset):
         #     prev_time = -1
         # print(f"-----> time = {time}, prev_time = {prev_time}, diff = {prev_time - time}")
         return Camera(
-            colmap_id=index, R=R, T=T, FoVx=FovX, FoVy=FovY, # prev_image=prev_image,
-            image=image, gt_alpha_mask=None, image_name=f"{index}",
-            uid=index, data_device=torch.device("cuda"), time=time, mask=mask, force=force, force_idx=force_idx
+            colmap_id=index, R=caminfo.R, T=caminfo.T, FoVx=caminfo.FovX, FoVy=caminfo.FovY, # prev_image=prev_image,
+            image=caminfo.image, gt_alpha_mask=None, image_name=f"{index}",
+            uid=index, data_device=torch.device("cuda"),
+            time=caminfo.time, mask=caminfo.mask, force=caminfo.force, force_idx=caminfo.force_idx
         )
 
     def __len__(self):

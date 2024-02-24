@@ -16,6 +16,27 @@ from scene.gaussian_model import GaussianModel
 from scene.cameras import Camera
 from utils.sh_utils import eval_sh
 
+def get_pos_t0(pc: GaussianModel):
+    means3D = pc.get_xyz
+    scales = pc._scaling
+    rotations = pc._rotation
+    opacity = pc._opacity
+    time = torch.tensor(0.0).to(means3D.device).repeat(means3D.shape[0], 1)
+    # pc._deformation.forward(means3D, scales, rotations, opacity, shs, time, force)
+    deformation_point = pc._deformation_table
+    t_0_points, _, _, _, _ =  pc._deformation(
+        means3D[deformation_point],
+        scales[deformation_point], 
+        rotations[deformation_point],
+        opacity[deformation_point],
+        time[deformation_point]
+    )
+    means3D_final = torch.zeros_like(means3D)
+    means3D_final[deformation_point] =  t_0_points
+    means3D_final[~deformation_point] = means3D[~deformation_point]
+    breakpoint()
+    return means3D_final
+
 def render(
     viewpoint_camera: Camera,
     pc: GaussianModel,
@@ -79,15 +100,38 @@ def render(
         means3D_final, scales_final, rotations_final, opacity_final, shs_final = means3D, scales, rotations, opacity, shs
         momentum_reg = torch.tensor(0.0)
     else:
+        # means3D.shape = (points, 3)
+        # scales.shape = (points, 3)
+        # rotations.shape = (points, 4)
+        # opacity.shape = (points, 1)
+        # shs.shape = (points, 16, 3)
+        # time.shape = (points, 1)
+        # force.shape = (points, 7)
+        # points = pc._xyz.shape[0]
+        # means3D2 = means3D.repeat([3, 1, 1])
+        # scales2 = scales.repeat([3, 1, 1])
+        # rotations2 = rotations.repeat([3, 1, 1])
+        # opacity2 = opacity.repeat([3, 1, 1])
+        # shs2 = shs.repeat([3, 1, 1, 1])
+        # time2 = time.repeat([3, 1, 1])
+        # force2 = force.repeat([3, 1, 1])
+        # means3D_final, scales_final, rotations_final, opacity_final, shs_final \
+        #     = pc._deformation.forward(means3D2, scales2, rotations2, opacity2, shs2, time2, force2)
+        # print(f"defor table shape: {pc._deformation_table.shape}")
+        # breakpoint()
         means3D_final, scales_final, rotations_final, opacity_final, shs_final \
             = pc._deformation.forward(means3D, scales, rotations, opacity, shs, time, force)
         # use magic number 1/39 for time-step difference
         time_prev = torch.ones_like(time) * (viewpoint_camera.time - 1/39)
         time_nxt = torch.ones_like(time) * (viewpoint_camera.time + 1/39)
         # use only means now
-        means3D_prev = pc._deformation.forward(means3D, scales, rotations, opacity, shs, time_prev, force)[0]
-        means3D_nxt = pc._deformation.forward(means3D, scales, rotations, opacity, shs, time_nxt, force)[0]
-        momentum_reg = torch.abs(means3D_nxt + means3D_prev - 2 * means3D_final).mean()
+        means3D_prev, scales_prev, rotations_prev, opacity_prev, shs_prev \
+            = pc._deformation.forward(means3D, scales, rotations, opacity, shs, time_prev, force)
+        means3D_nxt, scales_nxt, rotatiosn_nxt, opacity_nxt, shs_nxt \
+            = pc._deformation.forward(means3D, scales, rotations, opacity, shs, time_nxt, force)
+        momentum_reg = torch.abs(means3D_nxt + means3D_prev - 2 * means3D_final).mean() \
+            + torch.abs(opacity_final - opacity_prev).mean() \
+            + torch.abs(opacity_final - opacity_nxt).mean()
 
     scales_final = pc.scaling_activation(scales_final)
     rotations_final = pc.rotation_activation(rotations_final)

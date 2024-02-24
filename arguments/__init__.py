@@ -86,6 +86,7 @@ class ModelHiddenParams(ParamGroup):
         self.bounds = 1.6
         self.plane_tv_weight = 0.0001
         self.time_smoothness_weight = 0.01
+        self.force_weight = 0.00   # turned off by default
         self.l1_time_planes = 0.0001
         self.l2_time_planes = 0.0001
         self.kplanes_config = {

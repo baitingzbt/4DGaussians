@@ -2,7 +2,7 @@ _base_ = './dnerf_default.py'
 
 USE_FORCE = True
 USE_TIME = True
-BLEND_TIME_FORCE = True
+BLEND_TIME_FORCE = False
 RESOLUTION = [64, 64, 64]
 INPUT_DIM = 3
 
@@ -11,11 +11,11 @@ if USE_TIME:
     INPUT_DIM += 1
 
 if USE_FORCE and not BLEND_TIME_FORCE:
-    RESOLUTION += [64] # [32, 32, 32, 64]
+    RESOLUTION += [256] # [32, 32, 32, 64]
     INPUT_DIM += 1 # 4
 
 OptimizationParams = dict(
-    coarse_iterations = 10000, # 10000, # default: 3000
+    coarse_iterations = 100, # 10000, # default: 3000
     iterations = 5000000,
     batch_size = 8
 )
@@ -31,13 +31,13 @@ ModelHiddenParams = dict(
         'output_coordinate_dim': 128, # 64, 128
         'resolution': RESOLUTION
     },
-    # bounds=2.0,
     defor_depth = 4,
     use_force = USE_FORCE,
     use_time = USE_TIME,
     blend_time_force = BLEND_TIME_FORCE,
     plane_tv_weight = 0.0001,
     time_smoothness_weight = 0.01, # default: 0.01
+    force_weight = 0.01,
     l1_time_planes = 0., # 0001, # default: 0.0001
     l2_time_planes = 0.0005, # 0005,
     multires = [1, 2]

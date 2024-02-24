@@ -60,7 +60,22 @@ def init_grid_param(
     has_time_planes = bool(in_dim >= 4)
     has_force_planes = bool(in_dim >= 5)
     assert grid_nd <= in_dim
+    # if using force and not blend with time, <coo_combs> looks like
+    # 0: x, y
+    # 1: x, z
+    # 2: x, t
+    # 3: x, f
+    # 4: y, z
+    # 5: y, t
+    # 6: y, f
+    # 7: z, t
+    # 8: z, f
+    # 9: t, f -> dropped
+    # related to t: (2, 5, 7)     |    related to f: (3, 6, 8)
     coo_combs = list(itertools.combinations(range(in_dim), grid_nd))
+    # drop plane for (f, t) (3, 4) if it exists
+    if len(coo_combs) == 10:
+        coo_combs = coo_combs[:-1]
     grid_coefs = nn.ParameterList()
     for ci, coo_comb in enumerate(coo_combs):
         new_grid_coef = nn.Parameter(
@@ -86,20 +101,19 @@ def interpolate_ms_features(
     concat_features: bool,
     num_levels: Optional[int],
 ) -> torch.Tensor:
-    # sample_range = range(min(pts.shape[-1], 4))
-    # sample_dim = 2
     coo_combs = list(
         itertools.combinations(range(pts.shape[-1]), grid_dimensions)
     )
-    # if grid_dimensions == 3:
-    #     coo_combs = [comb + (4, ) for comb in coo_combs]
-    # print(coo_combs)
+    # drop plane for (f, t) (3, 4) if it exists
+    if len(coo_combs) == 10:
+        coo_combs = coo_combs[:-1]
+    # print("\n\ninterpolate_ms_features\n\n")
     # breakpoint()
     if num_levels is None:
         num_levels = len(ms_grids)
     multi_scale_interp = [] if concat_features else 0.
     grid: nn.ParameterList
-    for scale_id,  grid in enumerate(ms_grids[:num_levels]):
+    for scale_id, grid in enumerate(ms_grids[:num_levels]):
         interp_space = 1.
         for ci, coo_comb in enumerate(coo_combs):
             # interpolate in plane

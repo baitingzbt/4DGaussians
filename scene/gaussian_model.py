@@ -67,7 +67,16 @@ class GaussianModel:
         self.spatial_lr_scale = 0
         self._deformation_table = torch.empty(0)
         self.setup_functions()
-
+        if args.use_force and not args.blend_time_force:
+            self.time_grids = [2, 5, 7]
+            self.force_grids = [3, 6, 8]
+            self.plane_grids = [0, 1, 4]
+        else:
+            self.time_grids = [2, 4, 5]
+            self.force_grids = []
+            self.plane_grids = [0, 1, 3]
+        self.args = args
+    
     def capture(self):
         return (
             self.active_sh_degree,
@@ -141,7 +150,6 @@ class GaussianModel:
 
     def create_from_pcd(self, pcd : BasicPointCloud, spatial_lr_scale : float, time_line: int):
         self.spatial_lr_scale = spatial_lr_scale
-        # breakpoint()
         fused_point_cloud = torch.tensor(np.asarray(pcd.points)).to(dtype=torch.float32).cuda()
         fused_color = RGB2SH(torch.tensor(np.asarray(pcd.colors)).to(dtype=torch.float32).cuda())
         features = torch.zeros((fused_color.shape[0], 3, (self.max_sh_degree + 1) ** 2)).to(dtype=torch.float32).cuda()
@@ -437,7 +445,6 @@ class GaussianModel:
         padded_grad[:grads.shape[0]] = grads.squeeze()
         selected_pts_mask = torch.where(padded_grad >= grad_threshold, True, False)
 
-        # breakpoint()
         selected_pts_mask = torch.logical_and(selected_pts_mask,
                                               torch.max(self.get_scaling, dim=1).values > self.percent_dense*scene_extent)
         if not selected_pts_mask.any():
@@ -484,7 +491,6 @@ class GaussianModel:
         # Extract points that satisfy the gradient condition
         selected_pts_mask = torch.logical_and(grads_accum_mask,
                                               torch.max(self.get_scaling, dim=1).values <= self.percent_dense*scene_extent)
-        # breakpoint()        
         new_xyz = self._xyz[selected_pts_mask] 
         # - 0.001 * self._xyz.grad[selected_pts_mask]
         new_features_dc = self._features_dc[selected_pts_mask]
@@ -517,16 +523,6 @@ class GaussianModel:
         mask_c = mask_a & mask_b
         mask_d = mask_c.all(dim=1)
         final_point = final_point[mask_d]
-    
-        # while (mask_d.sum()/final_point.shape[0])<0.5:
-        #     perturb/=2
-        #     displacements = torch.randn(selected_point.shape[0], 3).to(selected_point) * perturb
-        #     final_point = selected_point + displacements
-        #     mask_a = final_point<xyz_max 
-        #     mask_b = final_point>xyz_min
-        #     mask_c = mask_a & mask_b
-        #     mask_d = mask_c.all(dim=1)
-        #     final_point = final_point[mask_d]
         return final_point, mask_d    
     def add_point_by_mask(self, selected_pts_mask, perturb=0):
         selected_xyz = self._xyz[selected_pts_mask] 
@@ -648,69 +644,73 @@ class GaussianModel:
 
     def _plane_regulation(self):
         multi_res_grids = self._deformation.deformation_net.grid.grids
-        time_grids = [0, 1, 3]
-        total = 0
+        total = 0.0
         # model.grids is 6 x [1, rank * F_dim, reso, reso]
         for grids in multi_res_grids:
             if len(grids) == 3:
                 continue
-            for grid_id in time_grids:
+            for grid_id in self.plane_grids:
                 total += compute_plane_smoothness(grids[grid_id])
         return total
     
     def _time_regulation(self):
         multi_res_grids = self._deformation.deformation_net.grid.grids
-        time_grids =[2, 4, 5]
-        total = 0
+        total = 0.0
         # model.grids is 6 x [1, rank * F_dim, reso, reso]
         for grids in multi_res_grids:
             if len(grids) == 3:
                 continue
-            for grid_id in time_grids:
+            for grid_id in self.time_grids:
                 total += compute_plane_smoothness(grids[grid_id])
         return total
-    
-    def _momentum_regulation(self):
-        self.get_features
-        # l_momentum = all_means_3D_deform[2,:,:] - 2*all_means_3D_deform[1,:,:] + all_means_3D_deform[0,:,:]
-        # l_momentum = torch.linalg.norm(l_momentum,dim=-1,ord=1).mean() # mean
 
-    
-    def _l1_regulation(self):
-        # model.grids is 6 x [1, rank * F_dim, reso, reso]
+    def _force_regulation(self):
         multi_res_grids = self._deformation.deformation_net.grid.grids
-        spatiotemporal_grids = [2, 4, 5]
         total = 0.0
         for grids in multi_res_grids:
             if len(grids) == 3:
                 continue
-            for grid_id in spatiotemporal_grids:
+            for grid_id in self.force_grids:
+                total += compute_plane_smoothness(grids[grid_id])
+        return total
+    
+    def _l1_regulation(self):
+        # model.grids is 6 x [1, rank * F_dim, reso, reso]
+        multi_res_grids = self._deformation.deformation_net.grid.grids
+        total = 0.0
+        for grids in multi_res_grids:
+            if len(grids) == 3:
+                continue
+            for grid_id in self.time_grids:
                 total += torch.abs(1 - grids[grid_id]).mean()
         return total
 
     def _l2_regulation(self):
         # model.grids is 6 x [1, rank * F_dim, reso, reso]
         multi_res_grids = self._deformation.deformation_net.grid.grids
-        spatiotemporal_grids = [2, 4, 5]
         total = 0.0
         for grids in multi_res_grids:
             if len(grids) == 3:
                 continue
-            for grid_id in spatiotemporal_grids:
+            for grid_id in self.time_grids:
                 total += torch.square(1 - grids[grid_id]).mean()
         return total
     
     # CALLED AT FINE STAGE ONLY, OUTPUT ADDED TO LOSS
-    def compute_regulation(self, time_smoothness_weight, l1_time_planes_weight, l2_time_planes_weight, plane_tv_weight):
+    def compute_regulation(self, time_smoothness_weight, l1_time_planes_weight, l2_time_planes_weight, plane_tv_weight, force_weight):
         time_reg = torch.tensor(0) if time_smoothness_weight <= 1e-7 else time_smoothness_weight * self._time_regulation()
         plane_reg = torch.tensor(0) if plane_tv_weight <= 1e-7 else plane_tv_weight * self._plane_regulation()
         l1_time_reg = torch.tensor(0) if l1_time_planes_weight <= 1e-7 else l1_time_planes_weight * self._l1_regulation()
         l2_time_reg = torch.tensor(0) if l2_time_planes_weight <= 1e-7 else l2_time_planes_weight * self._l2_regulation()
+        force_reg = torch.tensor(0) if (not self.args.use_force) or self.args.blend_time_force or force_weight <= 1e-7 \
+            else force_weight * self._force_regulation()
+        # breakpoint()
         reg_loss_dict = defaultdict(lambda: torch.tensor(0))
         reg_loss_dict['time_reg'] = time_reg
         reg_loss_dict['plane_reg'] = plane_reg
         reg_loss_dict['l1_time_reg'] = l1_time_reg
         reg_loss_dict['l2_time_reg'] = l2_time_reg
-        reg_loss_dict['total_reg'] = time_reg + plane_reg + l1_time_reg + l2_time_reg
+        reg_loss_dict['force_reg'] = force_reg
+        reg_loss_dict['total_reg'] = time_reg + plane_reg + l1_time_reg + l2_time_reg + force_reg
         return reg_loss_dict
 # CUDA_VISIBLE_DEVICES=2 nohup python train.py --data_path data_new/scene2_force1 data_new/scene2_force2 --n_train_cams 25 50 --n_test_cams 2 2 --expname scene2_morecam2 --configs arguments/dnerf/force.py --wandb > scene2_morecam2.out

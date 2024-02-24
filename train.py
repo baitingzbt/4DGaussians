@@ -14,7 +14,7 @@ import os, sys
 import torch
 from random import randint
 from utils.loss_utils import l1_loss, ssim, l2_loss, lpips_loss
-from gaussian_renderer.renderer import render
+from gaussian_renderer.renderer import render, get_pos_t0
 import sys
 from scene import Scene, GaussianModel
 from scene.cameras import Camera
@@ -33,9 +33,9 @@ from collections import defaultdict
 
 to8b = lambda x : (255 * np.clip(x.cpu().numpy(), 0, 1)).astype(np.uint8)
 FRAMES_EACH = 40
-EVAL_EVERY = 10000
+EVAL_EVERY = 10000 # 10000
 SAVE_EVERY = 50000
-LOG_EVERY = 500
+LOG_EVERY = 500 # 500
 
 def scene_reconstruction(
     dataset: GroupParams,
@@ -79,27 +79,22 @@ def scene_reconstruction(
     test_cams = scene.getTestCameras()
     train_cams = scene.getTrainCameras()
     n_train_cams = dataset.n_train_cams
+
+    train_cams_rdm = deepcopy(train_cams)
+    random.shuffle(train_cams_rdm)
     _train_cams = [randint(0, cams-1) + sum(n_train_cams[:i]) for i, cams in enumerate(n_train_cams)]
     train_views = []
     for _cam in _train_cams:
         train_views += [train_cams[_cam * FRAMES_EACH + i] for i in range(FRAMES_EACH)]
-
     test_views = [test_cams[i] for i in range(len(test_cams))]
-    viewpoint_stack = [i for i in tqdm(train_cams, desc='loading data...')]
-    viewpoint_force_idx = [cam.force_idx for cam in viewpoint_stack]
-    # temp_list = deepcopy(viewpoint_stack)
-    n_forces = max(viewpoint_force_idx) + 1
-    all_valid_indices = {fi: [] for fi in range(n_forces)}
-    for i, fi in enumerate(viewpoint_force_idx):
-        all_valid_indices[fi].append(i)
-    progress_by_force = np.array([1e6 for fi in range(n_forces)])
-
-
+    # test_gt_images = [view.original_image for view in test_views] # list of tensor on cpu
     batch_size = opt.batch_size
+    shuffle_inter = int(len(train_cams) / batch_size) + 1
     timer.start()
-    best_psnr = 40.
+    image_tensor = torch.zeros(size=(batch_size, 3, 600, 600), device='cuda')
+    gt_image_tensor = torch.zeros(size=(batch_size, 3, 600, 600), device='cuda')
     for iteration in range(first_iter, final_iter):        
-
+        # print(f"{iteration}")
         gaussians.update_learning_rate(iteration)
 
         # Every 1000 its we increase the levels of SH up to a maximum degree
@@ -107,52 +102,25 @@ def scene_reconstruction(
             gaussians.oneupSHdegree()
 
         # Pick a random Camera
-        shuffle_inter = int(len(train_cams) / batch_size) + 1
         if weighted_loss == -1:
             # shuffle the two lists randomly but keep the same relative order
             # reshuffle after going through entire data once
-            if iteration % shuffle_inter == 0 or iteration == first_iter:
-                _zipped = list(zip(viewpoint_stack, viewpoint_force_idx))
-                random.shuffle(_zipped)
-                viewpoint_stack, viewpoint_force_idx = zip(*_zipped)
+            if iteration == first_iter or iteration % shuffle_inter == 0:
+                random.shuffle(train_cams_rdm)
             # go through dataset sequentially for next <batch_size>
-            query_idxs = [((iteration * batch_size) + _i) % len(train_cams) for _i in range(batch_size)]
-        ########### hand-tuned weighting deprecated ###########
-        # # Don't shuffle. No need to follow each Camera()
-        # elif weighted_loss == 0:
-        #     # equal prob sample
-        #     if stage == 'coarse' or iteration < 80000:
-        #         query_force_idx = np.random.randint(0, n_forces)
-        #     else:
-        #         # easy/hard                          # naive/easy/hard
-        #         p = [0.35, 0.65] if n_forces == 2 else [0.25, 0.35, 0.4]
-        #         query_force_idx = np.random.choice(n_forces, p=p)
-        #     # sample a cam with matching query_force_idx
-        #     query_idxs = random.choice(all_valid_indices[query_force_idx])
-        elif weighted_loss == 1:
-            p = progress_by_force / np.sum(progress_by_force)
-            query_force_idx = np.random.choice(n_forces, p=p)
-            query_idxs = random.choice(all_valid_indices[query_force_idx])
+            query_idxs = [((iteration * batch_size) + _i) % len(train_cams_rdm) for _i in range(batch_size)]
         
         points = gaussians.get_xyz.shape[0]
-        image_tensor = torch.zeros(size=(batch_size, 3, 800, 800), device='cuda')
-        gt_image_tensor = torch.zeros(size=(batch_size, 3, 800, 800), device='cuda')
         visibility_tensor = torch.zeros(size=(batch_size, points), device='cuda')
         radii_tensor = torch.zeros(size=(batch_size, points), device='cuda')
-        viewspace_point_tensor = [] # torch.zeros(size=(batch_size, points, 3), device='cuda')
-        # for j, viewpoint_cam in enumerate(viewpoint_cams):
-        #     image, viewspace_point_tensor, visibility_filter, radii, depth \
-        #         = render(viewpoint_cam, gaussians, pipe, background, stage=stage)
-        #     image_tensor[j] = image
-        #     gt_image = viewpoint_cam.original_image.cuda()
-        #     gt_image_tensor[j] = gt_image
-
+        viewspace_point_tensor = []
         total_momentum_reg = 0
         for _i, query_idx in enumerate(query_idxs):
+            train_view = train_cams_rdm[query_idx]
             image, viewspace_point, visibility_filter, radii, depth, momentum_reg \
-                = render(viewpoint_stack[query_idx], gaussians, pipe, background, stage=stage)
+                = render(train_view, gaussians, pipe, background, stage=stage)
             image_tensor[_i] = image
-            gt_image_tensor[_i] = viewpoint_stack[query_idx].original_image.cuda()
+            gt_image_tensor[_i] = train_view.original_image.cuda()
             viewspace_point_tensor.append(viewspace_point)
             radii_tensor[_i] = radii
             visibility_tensor[_i] = visibility_filter
@@ -165,9 +133,11 @@ def scene_reconstruction(
         psnr_ = psnr(image_tensor, gt_image_tensor).mean() # .double()
         # norm
         if stage == "fine":
-            l1_reg_weight = hyper.l1_time_planes # * float(iteration > final_iter / 3)
-            l2_reg_weight = hyper.l2_time_planes # * float(iteration <= final_iter / 3)
-            tv_loss_dict = gaussians.compute_regulation(hyper.time_smoothness_weight, l1_reg_weight, l2_reg_weight, hyper.plane_tv_weight)
+            l1_reg_weight = hyper.l1_time_planes
+            l2_reg_weight = hyper.l2_time_planes
+            tv_loss_dict = gaussians.compute_regulation(
+                hyper.time_smoothness_weight, l1_reg_weight, l2_reg_weight, hyper.plane_tv_weight, hyper.force_weight
+            )
             loss += tv_loss_dict['total_reg']
             loss += total_momentum_reg
         else:
@@ -182,10 +152,8 @@ def scene_reconstruction(
         #     loss += opt.lambda_lpips * lpipsloss
 
         loss.backward()
-        if weighted_loss == 1:
-            n_this_force = len(all_valid_indices[query_force_idx])
-            progress_by_force[query_force_idx] = \
-                ((n_this_force - 1) * progress_by_force[query_force_idx] - math.log10(loss.item())) / n_this_force
+
+        # get_pos_t0(gaussians)
 
         viewspace_point_tensor_grad = torch.zeros_like(viewspace_point)
         for idx in range(batch_size):
@@ -194,24 +162,17 @@ def scene_reconstruction(
         with torch.no_grad():
             ema_loss_for_log = 0.4 * loss.item() + 0.6 * ema_loss_for_log
             ema_psnr_for_log = 0.4 * psnr_ + 0.6 * ema_psnr_for_log
-            total_point = gaussians._xyz.shape[0]
             if iteration % LOG_EVERY == 0:
-                # breakpoint()
                 infos = {
                     "Loss": round(ema_loss_for_log, 7),
                     "psnr": round(psnr_.item(), 2),
-                    "point": total_point,
+                    "point": points,
                     "mom_reg": total_momentum_reg.item()
                 }
                 for aux_loss_name, aux_loss_val in tv_loss_dict.items():
                     infos[aux_loss_name] = aux_loss_val.item()
-                progress_bar.set_postfix({k: str(v) for k, v in infos.items()})
+                # progress_bar.set_postfix({k: str(v) for k, v in infos.items()})
                 progress_bar.update(LOG_EVERY)
-                # if weighted_loss == 1 and use_wandb:
-                #     hist_data = wandb.Histogram(
-                #         sample_weight=np.histogram(progress_by_force / np.sum(progress_by_force), bins=[0, 1/3, 2/3, 1])
-                #     )
-                #     wandb.log({"sampling distribution": hist_data})
                 if use_wandb:
                     wandb.log(infos)
 
@@ -224,19 +185,22 @@ def scene_reconstruction(
             # if dataset.render_process:
             if (iteration % EVAL_EVERY == EVAL_EVERY - 1) \
                 or (iteration == final_iter-1):
-                # or (psnr_ > best_psnr and stage == 'fine'): # or (iteration == 1):
                 name_test = stage+"test"
                 name_train = stage+"train"
-                # if psnr_ > best_psnr and stage == 'fine':
-                #     name_test += '_best'
-                #     name_train += '_best'
-                #     best_psnr = max(psnr_, best_psnr) + 0.5
-                render_training_image(
+                avg_l1_test, avg_psnr_test = render_training_image(
                     scene, gaussians, test_views, pipe, background, name_test,
                     iteration, timer.get_elapsed_time(), save_video, save_pointclound, save_images, use_wandb)
-                render_training_image(
+                avg_l1_train, avg_psnr_train = render_training_image(
                     scene, gaussians, train_views, pipe, background, name_train,
                     iteration, timer.get_elapsed_time(), save_video, save_pointclound, save_images, use_wandb)
+                if use_wandb:
+                    infos = {
+                        "Render-Train-Loss": round(avg_l1_train, 7),
+                        "Render-Train-PSNR": round(avg_psnr_train, 2),
+                        "Render-Test-Loss": round(avg_l1_test, 7),
+                        "Render-Test-PSNR": round(avg_psnr_test, 2),
+                    }
+                    wandb.log(infos)
                 
             if (iteration % SAVE_EVERY == SAVE_EVERY - 1) or (iteration == final_iter-1):
                 print(f"\n[ITER {iteration}] Saving Checkpoint")
@@ -257,15 +221,15 @@ def scene_reconstruction(
                     opacity_threshold = opt.opacity_threshold_fine_init - iteration * (opt.opacity_threshold_fine_init - opt.opacity_threshold_fine_after) / opt.densify_until_iter
                     densify_threshold = opt.densify_grad_threshold_fine_init - iteration * (opt.densify_grad_threshold_fine_init - opt.densify_grad_threshold_after) / opt.densify_until_iter
                 
-                if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0 and gaussians.get_xyz.shape[0] < 360000:
+                if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0 and gaussians.get_xyz.shape[0] < 150000:
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
                     gaussians.densify(densify_threshold, opacity_threshold, scene.cameras_extent, size_threshold, 5, 5, scene.model_path, iteration, stage)
 
-                if iteration > opt.pruning_from_iter and iteration % opt.pruning_interval == 0 and gaussians.get_xyz.shape[0] > 240000:
+                if iteration > opt.pruning_from_iter and iteration % opt.pruning_interval == 0 and gaussians.get_xyz.shape[0] > 100000:
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
                     gaussians.prune(densify_threshold, opacity_threshold, scene.cameras_extent, size_threshold)
                     
-                if iteration % opt.densification_interval == 0 and gaussians.get_xyz.shape[0] < 360000 and opt.add_point:
+                if iteration % opt.densification_interval == 0 and gaussians.get_xyz.shape[0] < 150000 and opt.add_point:
                     gaussians.grow(5, 5, scene.model_path, iteration,stage)
 
                 if iteration % opt.opacity_reset_interval == 0:

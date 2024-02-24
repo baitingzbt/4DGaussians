@@ -80,50 +80,50 @@ def getNerfppNorm(cam_info):
     translate = -center
     return {"translate": translate, "radius": radius}
 
-def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
-    cam_infos = []
-    for idx, key in enumerate(cam_extrinsics):
-        sys.stdout.write('\r')
-        # the exact output you're looking for:
-        sys.stdout.write("Reading camera {}/{}".format(idx+1, len(cam_extrinsics)))
-        sys.stdout.flush()
+# def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
+#     cam_infos = []
+#     for idx, key in enumerate(cam_extrinsics):
+#         sys.stdout.write('\r')
+#         # the exact output you're looking for:
+#         sys.stdout.write("Reading camera {}/{}".format(idx+1, len(cam_extrinsics)))
+#         sys.stdout.flush()
 
-        extr = cam_extrinsics[key]
-        intr = cam_intrinsics[extr.camera_id]
-        height = intr.height
-        width = intr.width
+#         extr = cam_extrinsics[key]
+#         intr = cam_intrinsics[extr.camera_id]
+#         height = intr.height
+#         width = intr.width
 
-        uid = intr.id
-        R = np.transpose(qvec2rotmat(extr.qvec))
-        T = np.array(extr.tvec)
+#         uid = intr.id
+#         R = np.transpose(qvec2rotmat(extr.qvec))
+#         T = np.array(extr.tvec)
 
-        if intr.model in ["SIMPLE_PINHOLE", "SIMPLE_RADIAL"]:
-            focal_length_x = intr.params[0]
-            FovY = focal2fov(focal_length_x, height)
-            FovX = focal2fov(focal_length_x, width)
-        elif intr.model=="PINHOLE":
-            focal_length_x = intr.params[0]
-            focal_length_y = intr.params[1]
-            FovY = focal2fov(focal_length_y, height)
-            FovX = focal2fov(focal_length_x, width)
-        elif intr.model == "OPENCV":
-            focal_length_x = intr.params[0]
-            focal_length_y = intr.params[1]
-            FovY = focal2fov(focal_length_y, height)
-            FovX = focal2fov(focal_length_x, width)
-        else:
-            assert False, "Colmap camera model not handled: only undistorted datasets (PINHOLE or SIMPLE_PINHOLE cameras) supported!"
+#         if intr.model in ["SIMPLE_PINHOLE", "SIMPLE_RADIAL"]:
+#             focal_length_x = intr.params[0]
+#             FovY = focal2fov(focal_length_x, height)
+#             FovX = focal2fov(focal_length_x, width)
+#         elif intr.model=="PINHOLE":
+#             focal_length_x = intr.params[0]
+#             focal_length_y = intr.params[1]
+#             FovY = focal2fov(focal_length_y, height)
+#             FovX = focal2fov(focal_length_x, width)
+#         elif intr.model == "OPENCV":
+#             focal_length_x = intr.params[0]
+#             focal_length_y = intr.params[1]
+#             FovY = focal2fov(focal_length_y, height)
+#             FovX = focal2fov(focal_length_x, width)
+#         else:
+#             assert False, "Colmap camera model not handled: only undistorted datasets (PINHOLE or SIMPLE_PINHOLE cameras) supported!"
 
-        image_path = os.path.join(images_folder, os.path.basename(extr.name))
-        image_name = os.path.basename(image_path).split(".")[0]
-        image = Image.open(image_path)
-        image = PILtoTorch(image,None)
-        cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
-                              image_path=image_path, image_name=image_name, width=width, height=height,
-                              time = float(idx/len(cam_extrinsics)), mask=None) # default by monocular settings.
-        cam_infos.append(cam_info)
-    sys.stdout.write('\n')
-    return cam_infos
+#         image_path = os.path.join(images_folder, os.path.basename(extr.name))
+#         image_name = os.path.basename(image_path).split(".")[0]
+#         image = Image.open(image_path)
+#         image = PILtoTorch(image,None)
+#         cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
+#                               image_path=image_path, image_name=image_name, width=width, height=height,
+#                               time = float(idx/len(cam_extrinsics)), mask=None) # default by monocular settings.
+#         cam_infos.append(cam_info)
+#     sys.stdout.write('\n')
+#     return cam_infos
 
 def fetchPly(path):
     plydata = PlyData.read(path)
@@ -151,120 +151,120 @@ def storePly(path, xyz, rgb):
     ply_data = PlyData([vertex_element])
     ply_data.write(path)
 
-def readColmapSceneInfo(path, images, eval, llffhold=8):
-    try:
-        cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.bin")
-        cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.bin")
-        cam_extrinsics = read_extrinsics_binary(cameras_extrinsic_file)
-        cam_intrinsics = read_intrinsics_binary(cameras_intrinsic_file)
-    except:
-        cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.txt")
-        cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.txt")
-        cam_extrinsics = read_extrinsics_text(cameras_extrinsic_file)
-        cam_intrinsics = read_intrinsics_text(cameras_intrinsic_file)
+# def readColmapSceneInfo(path, images, eval, llffhold=8):
+#     try:
+#         cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.bin")
+#         cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.bin")
+#         cam_extrinsics = read_extrinsics_binary(cameras_extrinsic_file)
+#         cam_intrinsics = read_intrinsics_binary(cameras_intrinsic_file)
+#     except:
+#         cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.txt")
+#         cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.txt")
+#         cam_extrinsics = read_extrinsics_text(cameras_extrinsic_file)
+#         cam_intrinsics = read_intrinsics_text(cameras_intrinsic_file)
 
-    reading_dir = "images" if images == None else images
-    cam_infos_unsorted = readColmapCameras(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics, images_folder=os.path.join(path, reading_dir))
-    cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
-    # breakpoint()
-    if eval:
-        train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold != 0]
-        test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold == 0]
-    else:
-        train_cam_infos = cam_infos
-        test_cam_infos = []
+#     reading_dir = "images" if images == None else images
+#     cam_infos_unsorted = readColmapCameras(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics, images_folder=os.path.join(path, reading_dir))
+#     cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
+#     # breakpoint()
+#     if eval:
+#         train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold != 0]
+#         test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold == 0]
+#     else:
+#         train_cam_infos = cam_infos
+#         test_cam_infos = []
 
-    nerf_normalization = getNerfppNorm(train_cam_infos)
+#     nerf_normalization = getNerfppNorm(train_cam_infos)
 
-    ply_path = os.path.join(path, "sparse/0/points3D.ply")
-    bin_path = os.path.join(path, "sparse/0/points3D.bin")
-    txt_path = os.path.join(path, "sparse/0/points3D.txt")
-    if not os.path.exists(ply_path):
-        print("Converting point3d.bin to .ply, will happen only the first time you open the scene.")
-        try:
-            xyz, rgb, _ = read_points3D_binary(bin_path)
-        except:
-            xyz, rgb, _ = read_points3D_text(txt_path)
-        storePly(ply_path, xyz, rgb)
+#     ply_path = os.path.join(path, "sparse/0/points3D.ply")
+#     bin_path = os.path.join(path, "sparse/0/points3D.bin")
+#     txt_path = os.path.join(path, "sparse/0/points3D.txt")
+#     if not os.path.exists(ply_path):
+#         print("Converting point3d.bin to .ply, will happen only the first time you open the scene.")
+#         try:
+#             xyz, rgb, _ = read_points3D_binary(bin_path)
+#         except:
+#             xyz, rgb, _ = read_points3D_text(txt_path)
+#         storePly(ply_path, xyz, rgb)
     
-    try:
-        pcd = fetchPly(ply_path)
+#     try:
+#         pcd = fetchPly(ply_path)
         
-    except:
-        pcd = None
+#     except:
+#         pcd = None
     
-    scene_info = SceneInfo(point_cloud=pcd,
-                           train_cameras=train_cam_infos,
-                           test_cameras=test_cam_infos,
-                           maxtime=0,
-                           nerf_normalization=nerf_normalization,
-                           ply_path=ply_path)
-    return scene_info
-def generateCamerasFromTransforms(path, template_transformsfile, extension, maxtime):
-    trans_t = lambda t : torch.Tensor([
-    [1,0,0,0],
-    [0,1,0,0],
-    [0,0,1,t],
-    [0,0,0,1]]).to(dtype=torch.float32)
+#     scene_info = SceneInfo(point_cloud=pcd,
+#                            train_cameras=train_cam_infos,
+#                            test_cameras=test_cam_infos,
+#                            maxtime=0,
+#                            nerf_normalization=nerf_normalization,
+#                            ply_path=ply_path)
+#     return scene_info
+# def generateCamerasFromTransforms(path, template_transformsfile, extension, maxtime):
+#     trans_t = lambda t : torch.Tensor([
+#     [1,0,0,0],
+#     [0,1,0,0],
+#     [0,0,1,t],
+#     [0,0,0,1]]).to(dtype=torch.float32)
 
-    rot_phi = lambda phi : torch.Tensor([
-        [1,0,0,0],
-        [0,np.cos(phi),-np.sin(phi),0],
-        [0,np.sin(phi), np.cos(phi),0],
-        [0,0,0,1]]).to(dtype=torch.float32)
+#     rot_phi = lambda phi : torch.Tensor([
+#         [1,0,0,0],
+#         [0,np.cos(phi),-np.sin(phi),0],
+#         [0,np.sin(phi), np.cos(phi),0],
+#         [0,0,0,1]]).to(dtype=torch.float32)
 
-    rot_theta = lambda th : torch.Tensor([
-        [np.cos(th), 0, -np.sin(th), 0],
-        [0, 1, 0, 0],
-        [np.sin(th), 0, np.cos(th),0],
-        [0, 0, 0, 1]
-    ]).to(dtype=torch.float32)
-    def pose_spherical(theta, phi, radius):
-        c2w = trans_t(radius)
-        c2w = rot_phi(phi/180. * torch.pi) @ c2w
-        c2w = rot_theta(theta / 180. * torch.pi) @ c2w
-        c2w = torch.Tensor([
-            [-1, 0, 0, 0],
-            [0, 0, 1, 0],
-            [0, 1, 0, 0],
-            [0, 0, 0, 1]
-        ]) @ c2w
-        return c2w
+#     rot_theta = lambda th : torch.Tensor([
+#         [np.cos(th), 0, -np.sin(th), 0],
+#         [0, 1, 0, 0],
+#         [np.sin(th), 0, np.cos(th),0],
+#         [0, 0, 0, 1]
+#     ]).to(dtype=torch.float32)
+#     def pose_spherical(theta, phi, radius):
+#         c2w = trans_t(radius)
+#         c2w = rot_phi(phi/180. * torch.pi) @ c2w
+#         c2w = rot_theta(theta / 180. * torch.pi) @ c2w
+#         c2w = torch.Tensor([
+#             [-1, 0, 0, 0],
+#             [0, 0, 1, 0],
+#             [0, 1, 0, 0],
+#             [0, 0, 0, 1]
+#         ]) @ c2w
+#         return c2w
     
-    cam_infos = []
-    # generate render poses and times
-    render_poses = torch.stack(
-        [pose_spherical(angle, -30.0, 4.0) for angle in np.linspace(-180, 180, 160+1)[:-1]], 0
-    )
-    render_times = torch.linspace(0,maxtime,render_poses.shape[0])
-    with open(os.path.join(path, template_transformsfile)) as json_file:
-        template_json = json.load(json_file)
-    fovx = template_json['camera_angle_x'] if 'camera_angle_x' in template_json.keys() \
-        else focal2fov(template_json['fl_x'], template_json['w'])
+#     cam_infos = []
+#     # generate render poses and times
+#     render_poses = torch.stack(
+#         [pose_spherical(angle, -30.0, 4.0) for angle in np.linspace(-180, 180, 160+1)[:-1]], 0
+#     )
+#     render_times = torch.linspace(0,maxtime,render_poses.shape[0])
+#     with open(os.path.join(path, template_transformsfile)) as json_file:
+#         template_json = json.load(json_file)
+#     fovx = template_json['camera_angle_x'] if 'camera_angle_x' in template_json.keys() \
+#         else focal2fov(template_json['fl_x'], template_json['w'])
     
-    # load a single image to get image info.
-    cam_name = os.path.join(path, template_json["frames"][0]["file_path"] + extension)
-    image_path = os.path.join(path, cam_name)
-    image = Image.open(image_path)
-    image = PILtoTorch(image, (800, 800))
+#     # load a single image to get image info.
+#     cam_name = os.path.join(path, template_json["frames"][0]["file_path"] + extension)
+#     image_path = os.path.join(path, cam_name)
+#     image = Image.open(image_path)
+#     image = PILtoTorch(image, (800, 800))
 
-    # format information
-    for idx, (time, poses) in enumerate(zip(render_times,render_poses)):
-        time = time/maxtime
-        matrix = np.linalg.inv(np.array(poses))
-        R = -np.transpose(matrix[:3, :3])
-        R[:, 0] = -R[:, 0]
-        T = -matrix[:3, 3]
-        fovy = focal2fov(fov2focal(fovx, image.shape[1]), image.shape[2])
-        FovY = fovy 
-        FovX = fovx
-        cam_infos.append(
-            CameraInfo(
-                uid=idx, R=R, T=T, FovY=FovY, FovX=FovX, image=image, image_path=None,
-                image_name=None, width=image.shape[1], height=image.shape[2], time = time, mask=None
-            )
-        )
-    return cam_infos
+#     # format information
+#     for idx, (time, poses) in enumerate(zip(render_times,render_poses)):
+#         time = time/maxtime
+#         matrix = np.linalg.inv(np.array(poses))
+#         R = -np.transpose(matrix[:3, :3])
+#         R[:, 0] = -R[:, 0]
+#         T = -matrix[:3, 3]
+#         fovy = focal2fov(fov2focal(fovx, image.shape[1]), image.shape[2])
+#         FovY = fovy 
+#         FovX = fovx
+#         cam_infos.append(
+#             CameraInfo(
+#                 uid=idx, R=R, T=T, FovY=FovY, FovX=FovX, image=image, image_path=None,
+#                 image_name=None, width=image.shape[1], height=image.shape[2], time = time, mask=None
+#             )
+#         )
+#     return cam_infos
 
 def readCamerasFromTransforms(
     path: str,
@@ -299,10 +299,6 @@ def readCamerasFromTransforms(
         image = Image.fromarray(np.array(arr * 255.0, dtype=np.byte), "RGB")
         image = PILtoTorch(image, (800, 800))
         fovy = focal2fov(fov2focal(fovx, image.shape[1]), image.shape[2])
-        # force.shape = (7, )
-        # (x, y, z) + (rx, ry, rz) + strength
-        # currently, the first three dimensions are "redundant"
-        # direction is in radians, euler rotation, strength is float
         force = np.array(frame['force']); assert force.shape == (7, )
         cam_infos.append(
             CameraInfo(
@@ -316,57 +312,37 @@ def readCamerasFromTransforms(
 def readCamerasFromShortTransforms(
     path: str,
     transformsfile: str,
-    white_background: bool,
-    extension: str,
     mapper: Dict,
     force_idx: int,
-) -> List[CameraInfo]:
-    transformsfile = f"{transformsfile[:-5]}_short.json"
-    cam_infos = []
-    with open(os.path.join(path, transformsfile)) as json_file:
+) -> List[Camera]:
+    cams = []
+    with open(f"{path}/{transformsfile[:-5]}_short.json") as json_file:
         contents: Dict = json.load(json_file)
-    fovx = contents['camera_angle_x']
-    matrix = np.linalg.inv(np.array(contents["transform_matrix"]))
-    R = -np.transpose(matrix[:3, :3])
+    matrix = -np.linalg.inv(np.array(contents["transform_matrix"]))
+    R = np.transpose(matrix[:3, :3])
     R[:, 0] = -R[:, 0]
-    T = -matrix[:3, 3]
-    H, W = 800, 800
-    fovy = focal2fov(fov2focal(fovx, H), W)
-    force = np.array(contents['force'])
-    bg = np.array([1, 1, 1]) if white_background else np.array([0, 0, 0])
-    for idx, frame in enumerate(contents["frames"]):
-        if idx >= MAX_FRAME:
-            break
-        cam_name = os.path.join(path, frame["file_path"] + extension)
-        time = mapper[frame["time"]]
-        image_path = os.path.join(path, cam_name)
-        image_name = Path(cam_name).stem
-        image = Image.open(image_path)
-        im_data = np.array(image.convert("RGBA"))
-        norm_data = im_data / 255.0
-        arr = norm_data[:, :, :3] * norm_data[:, :, 3:4] + bg * (1 - norm_data[:, :, 3:4])
-        # image = Image.fromarray(np.array(arr * 255.0, dtype=np.byte), "RGB")
-        # image = PILtoTorch(image, (H, W))
-        arr_tensor = torch.tensor(arr, dtype=torch.float32).permute(2, 0, 1)
-        cam_infos.append(
-            CameraInfo(
-                uid=idx, R=R, T=T, FovY=fovy, FovX=fovx, image=arr_tensor, image_path=image_path,
-                image_name=image_name, width=W, height=H, time=time, mask=None, force=force, force_idx=force_idx
+    # H, W = contents['height'], contents['width']    # original H, W
+    # NEW_H, NEW_W = 600, 600    # target H, W
+    force = np.array(contents['force'])[3:]  #  directly drop positions here
+    for frame in contents["frames"]:
+        image = Image.open(os.path.join(path, frame["file_path"])).resize((600, 600))
+        norm_data =  np.array(image.convert("RGBA")) / 255.0
+        # assume white_background = True
+        arr = norm_data[:, :, :3] * norm_data[:, :, 3:4] + (1 - norm_data[:, :, 3:4])
+        cams.append(
+            Camera(
+                R=R,
+                T=matrix[:3, 3],
+                FoVx=contents['camera_angle_x'], # assume H and W are the same to save compute
+                FoVy=contents['camera_angle_x'], # assume H and W are the same to save compute
+                image=torch.tensor(arr, dtype=torch.float32).permute(2, 0, 1),
+                time=mapper[frame["time"]],
+                force=force,
+                force_idx=force_idx
             )
         )
-    return cam_infos
+    return cams
 
-
-def read_timeline(path):
-    with open(os.path.join(path, "transforms_train.json")) as json_file:
-        train_json = json.load(json_file)
-    with open(os.path.join(path, "transforms_test.json")) as json_file:
-        test_json = json.load(json_file)  
-    time_line = [frame["time"] for frame in train_json["frames"]] + [frame["time"] for frame in test_json["frames"]]
-    time_line = list(sorted(set(time_line)))
-    max_time_float = max(time_line)
-    timestamp_mapper = {t: t / max_time_float for t in time_line}
-    return timestamp_mapper, max_time_float
 
 
 def read_force_timeline(paths_train: List[str], paths_test: List[str]):
@@ -385,62 +361,20 @@ def read_force_timeline(paths_train: List[str], paths_test: List[str]):
     timestamp_mapper = {t: t / max_time_float for t in time_lines}
     return timestamp_mapper, max_time_float
 
-# # commented out below to exclude ambiguity. We use Force specifically, not Nerf reader
-
-# def readNerfSyntheticInfo(path, white_background, eval, extension=".png"):
-#     timestamp_mapper, max_time = read_timeline(path)
-#     print("Reading Training Transforms")
-#     train_cam_infos = readCamerasFromTransforms(path, "transforms_train.json", white_background, extension, timestamp_mapper)
-#     print("Reading Test Transforms")
-#     test_cam_infos = readCamerasFromTransforms(path, "transforms_test.json", white_background, extension, timestamp_mapper)
-#     print("Generating Video Transforms")
-#     video_cam_infos = generateCamerasFromTransforms(path, "transforms_train.json", extension, max_time)
-#     if not eval:
-#         train_cam_infos.extend(test_cam_infos)
-#         test_cam_infos = []
-
-#     nerf_normalization = getNerfppNorm(train_cam_infos)
-
-#     ply_path = os.path.join(path, "fused.ply")
-#     if not os.path.exists(ply_path):
-#         # Since this data set has no colmap data, we start with random points
-#         num_pts = 2000
-#         print(f"Generating random point cloud ({num_pts})...")
-
-#         # We create random points inside the bounds of the synthetic Blender scenes
-#         xyz = np.random.random((num_pts, 3)) * 2.6 - 1.3
-#         shs = np.random.random((num_pts, 3)) / 255.0
-#         pcd = BasicPointCloud(points=xyz, colors=SH2RGB(shs), normals=np.zeros((num_pts, 3)))
-#     else:
-#         pcd = fetchPly(ply_path)
-
-
-#     scene_info = SceneInfo(
-#         point_cloud=pcd,
-#         train_cameras=train_cam_infos,
-#         test_cameras=test_cam_infos,
-#         video_cameras=video_cam_infos,
-#         nerf_normalization=nerf_normalization,
-#         ply_path=ply_path,
-#         maxtime=max_time
-#     )
-#     return scene_info
-
 def readForceSyntheticInfo(
     paths_train: List[str],
     paths_test: List[str],
     n_train_cams: List[int],
     n_test_cams: List[int],
-    white_background,
-    eval,
+    white_background: bool
 ):
     paths = paths_train + paths_test
     timestamp_mapper, max_time = read_force_timeline(paths_train, paths_test)
-    def helper(path: str, i: int, split: str, force_idx: int) -> List[CameraInfo]:
+    def helper(path: str, i: int, split: str, force_idx: int) -> List[Camera]:
         # force_setting is id of force
         cam_path = os.path.join(path, f'{split}/cam_{i}')
         # readCamerasFromTransforms, readCamerasFromShortTransforms
-        return readCamerasFromShortTransforms(cam_path, "transforms.json", white_background, '', timestamp_mapper, force_idx)
+        return readCamerasFromShortTransforms(cam_path, "transforms.json", timestamp_mapper, force_idx)
 
     train_cam_infos = []
     test_cam_infos = []
@@ -451,21 +385,13 @@ def readForceSyntheticInfo(
         for i in tqdm(range(test_cams), desc='Reading Test'):
             test_cam_infos += helper(_path, i, 'test', force_idx)
 
-    if not eval:
-        train_cam_infos.extend(test_cam_infos)
-        test_cam_infos = []
-
     nerf_normalization = getNerfppNorm(train_cam_infos)
     ply_path = os.path.join(paths[0], "fused.ply") # NOTE: PLACEHOLDER?
-    # Since this data set has no colmap data, we start with random points
     num_pts = 2000
-    print(f"Generating random point cloud ({num_pts})...")
     # We create random points inside the bounds of the synthetic Blender scenes
     xyz = np.random.random((num_pts, 3)) * 2.6 - 1.3
     shs = np.random.random((num_pts, 3)) / 255.0
     pcd = BasicPointCloud(points=xyz, colors=SH2RGB(shs), normals=np.zeros((num_pts, 3)))
-
-
     scene_info = SceneInfo(
         point_cloud=pcd,
         train_cameras=train_cam_infos,
@@ -495,58 +421,30 @@ def format_infos(dataset,split):
 
     return cameras
 
-
-def readHyperDataInfos(datadir,use_bg_points,eval):
-    train_cam_infos = Load_hyper_data(datadir,0.5,use_bg_points,split ="train")
-    test_cam_infos = Load_hyper_data(datadir,0.5,use_bg_points,split="test")
-    print("load finished")
-    train_cam = format_hyper_data(train_cam_infos,"train")
-    print("format finished")
-    max_time = train_cam_infos.max_time
-    video_cam_infos = copy.deepcopy(test_cam_infos)
-    video_cam_infos.split="video"
-
-
-    ply_path = os.path.join(datadir, "points3D_downsample.ply")
-    pcd = fetchPly(ply_path)
-    xyz = np.array(pcd.points)
-
-    pcd = pcd._replace(points=xyz)
-    nerf_normalization = getNerfppNorm(train_cam)
-    plot_camera_orientations(train_cam_infos, pcd.points)
-    scene_info = SceneInfo(point_cloud=pcd,
-                           train_cameras=train_cam_infos,
-                           test_cameras=test_cam_infos,
-                           nerf_normalization=nerf_normalization,
-                           ply_path=ply_path,
-                           maxtime=max_time
-                           )
-    return scene_info
-
-def format_render_poses(poses,data_infos):
-    cameras = []
-    tensor_to_pil = transforms.ToPILImage()
-    len_poses = len(poses)
-    times = [i/len_poses for i in range(len_poses)]
-    image = data_infos[0][0]
-    for idx, p in tqdm(enumerate(poses)):
-        # image = None
-        image_path = None
-        image_name = f"{idx}"
-        time = times[idx]
-        pose = np.eye(4)
-        pose[:3,:] = p[:3,:]
-        # matrix = np.linalg.inv(np.array(pose))
-        R = pose[:3,:3]
-        R = - R
-        R[:,0] = -R[:,0]
-        T = -pose[:3,3].dot(R)
-        FovX = focal2fov(data_infos.focal[0], image.shape[2])
-        FovY = focal2fov(data_infos.focal[0], image.shape[1])
-        cameras.append(CameraInfo(uid=idx, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
-                            image_path=image_path, image_name=image_name, width=image.shape[2], height=image.shape[1],
-                            time = time, mask=None))
-    return cameras
+# def format_render_poses(poses,data_infos):
+#     cameras = []
+#     tensor_to_pil = transforms.ToPILImage()
+#     len_poses = len(poses)
+#     times = [i/len_poses for i in range(len_poses)]
+#     image = data_infos[0][0]
+#     for idx, p in tqdm(enumerate(poses)):
+#         # image = None
+#         image_path = None
+#         image_name = f"{idx}"
+#         time = times[idx]
+#         pose = np.eye(4)
+#         pose[:3,:] = p[:3,:]
+#         # matrix = np.linalg.inv(np.array(pose))
+#         R = pose[:3,:3]
+#         R = - R
+#         R[:,0] = -R[:,0]
+#         T = -pose[:3,3].dot(R)
+#         FovX = focal2fov(data_infos.focal[0], image.shape[2])
+#         FovY = focal2fov(data_infos.focal[0], image.shape[1])
+#         cameras.append(CameraInfo(uid=idx, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
+#                             image_path=image_path, image_name=image_name, width=image.shape[2], height=image.shape[1],
+#                             time = time, mask=None))
+#     return cameras
 
 def add_points(pointsclouds, xyz_min, xyz_max):
     add_points = (np.random.random((100000, 3)))* (xyz_max-xyz_min) + xyz_min
@@ -561,171 +459,56 @@ def add_points(pointsclouds, xyz_min, xyz_max):
     pointsclouds=pointsclouds._replace(normals=new_normals)
     return pointsclouds
 
-def readdynerfInfo(datadir,use_bg_points,eval):
-    # loading all the data follow hexplane format
-    # ply_path = os.path.join(datadir, "points3D_dense.ply")
-    ply_path = os.path.join(datadir, "points3D_downsample2.ply")
-    from scene.neural_3D_dataset_NDC import Neural3D_NDC_Dataset
-    train_dataset = Neural3D_NDC_Dataset(
-    datadir,
-    "train",
-    1.0,
-    time_scale=1,
-    scene_bbox_min=[-2.5, -2.0, -1.0],
-    scene_bbox_max=[2.5, 2.0, 1.0],
-    eval_index=0,
-        )    
-    test_dataset = Neural3D_NDC_Dataset(
-    datadir,
-    "test",
-    1.0,
-    time_scale=1,
-    scene_bbox_min=[-2.5, -2.0, -1.0],
-    scene_bbox_max=[2.5, 2.0, 1.0],
-    eval_index=0,
-        )
-    train_cam_infos = format_infos(train_dataset,"train")
-    val_cam_infos = format_render_poses(test_dataset.val_poses,test_dataset)
-    nerf_normalization = getNerfppNorm(train_cam_infos)
+# def setup_camera(w, h, k, w2c, near=0.01, far=100):
+#     from diff_gaussian_rasterization import GaussianRasterizationSettings as Camera
+#     fx, fy, cx, cy = k[0][0], k[1][1], k[0][2], k[1][2]
+#     w2c = torch.tensor(w2c).cuda().to(dtype=torch.float32)
+#     cam_center = torch.inverse(w2c)[:3, 3]
+#     w2c = w2c.unsqueeze(0).transpose(1, 2)
+#     opengl_proj = torch.tensor([[2 * fx / w, 0.0, -(w - 2 * cx) / w, 0.0],
+#                                 [0.0, 2 * fy / h, -(h - 2 * cy) / h, 0.0],
+#                                 [0.0, 0.0, far / (far - near), -(far * near) / (far - near)],
+#                                 [0.0, 0.0, 1.0, 0.0]]).cuda().to(dtype=torch.float32).unsqueeze(0).transpose(1, 2)
+#     full_proj = w2c.bmm(opengl_proj)
+#     cam = Camera(
+#         image_height=h,
+#         image_width=w,
+#         tanfovx=w / (2 * fx),
+#         tanfovy=h / (2 * fy),
+#         bg=torch.tensor([0, 0, 0], dtype=torch.float32, device="cuda"),
+#         scale_modifier=1.0,
+#         viewmatrix=w2c,
+#         projmatrix=full_proj,
+#         sh_degree=0,
+#         campos=cam_center,
+#         prefiltered=False,
+#         debug=True
+#     )
+#     return cam
 
-    # xyz = np.load
-    pcd = fetchPly(ply_path)
-    print("origin points,",pcd.points.shape[0])
-    
-    print("after points,",pcd.points.shape[0])
+# def plot_camera_orientations(cam_list, xyz):
+#     import matplotlib.pyplot as plt
+#     fig = plt.figure()
+#     ax = fig.add_subplot(111, projection='3d')
+#     # ax2 = fig.add_subplot(122, projection='3d')
+#     # xyz = xyz[xyz[:,0]<1]
+#     threshold=2
+#     xyz = xyz[(xyz[:, 0] >= -threshold) & (xyz[:, 0] <= threshold) &
+#                          (xyz[:, 1] >= -threshold) & (xyz[:, 1] <= threshold) &
+#                          (xyz[:, 2] >= -threshold) & (xyz[:, 2] <= threshold)]
 
-    scene_info = SceneInfo(point_cloud=pcd,
-                           train_cameras=train_dataset,
-                           test_cameras=test_dataset,
-                           nerf_normalization=nerf_normalization,
-                           ply_path=ply_path,
-                           maxtime=300
-                           )
-    return scene_info
+#     ax.scatter(xyz[:,0],xyz[:,1],xyz[:,2],c='r',s=0.1)
+#     for cam in tqdm(cam_list):
+#         # 提取 R 和 T
+#         R = cam.R
+#         T = cam.T
 
-def setup_camera(w, h, k, w2c, near=0.01, far=100):
-    from diff_gaussian_rasterization import GaussianRasterizationSettings as Camera
-    fx, fy, cx, cy = k[0][0], k[1][1], k[0][2], k[1][2]
-    w2c = torch.tensor(w2c).cuda().to(dtype=torch.float32)
-    cam_center = torch.inverse(w2c)[:3, 3]
-    w2c = w2c.unsqueeze(0).transpose(1, 2)
-    opengl_proj = torch.tensor([[2 * fx / w, 0.0, -(w - 2 * cx) / w, 0.0],
-                                [0.0, 2 * fy / h, -(h - 2 * cy) / h, 0.0],
-                                [0.0, 0.0, far / (far - near), -(far * near) / (far - near)],
-                                [0.0, 0.0, 1.0, 0.0]]).cuda().to(dtype=torch.float32).unsqueeze(0).transpose(1, 2)
-    full_proj = w2c.bmm(opengl_proj)
-    cam = Camera(
-        image_height=h,
-        image_width=w,
-        tanfovx=w / (2 * fx),
-        tanfovy=h / (2 * fy),
-        bg=torch.tensor([0, 0, 0], dtype=torch.float32, device="cuda"),
-        scale_modifier=1.0,
-        viewmatrix=w2c,
-        projmatrix=full_proj,
-        sh_degree=0,
-        campos=cam_center,
-        prefiltered=False,
-        debug=True
-    )
-    return cam
+#         direction = R @ np.array([0, 0, 1])
 
-def plot_camera_orientations(cam_list, xyz):
-    import matplotlib.pyplot as plt
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
-    # ax2 = fig.add_subplot(122, projection='3d')
-    # xyz = xyz[xyz[:,0]<1]
-    threshold=2
-    xyz = xyz[(xyz[:, 0] >= -threshold) & (xyz[:, 0] <= threshold) &
-                         (xyz[:, 1] >= -threshold) & (xyz[:, 1] <= threshold) &
-                         (xyz[:, 2] >= -threshold) & (xyz[:, 2] <= threshold)]
+#         ax.quiver(T[0], T[1], T[2], direction[0], direction[1], direction[2], length=1)
 
-    ax.scatter(xyz[:,0],xyz[:,1],xyz[:,2],c='r',s=0.1)
-    for cam in tqdm(cam_list):
-        # 提取 R 和 T
-        R = cam.R
-        T = cam.T
+#     ax.set_xlabel('X Axis')
+#     ax.set_ylabel('Y Axis')
+#     ax.set_zlabel('Z Axis')
+#     plt.savefig("output.png")
 
-        direction = R @ np.array([0, 0, 1])
-
-        ax.quiver(T[0], T[1], T[2], direction[0], direction[1], direction[2], length=1)
-
-    ax.set_xlabel('X Axis')
-    ax.set_ylabel('Y Axis')
-    ax.set_zlabel('Z Axis')
-    plt.savefig("output.png")
-
-def readPanopticmeta(datadir, json_path):
-    with open(os.path.join(datadir,json_path)) as f:
-        test_meta = json.load(f)
-    w = test_meta['w']
-    h = test_meta['h']
-    max_time = len(test_meta['fn'])
-    cam_infos = []
-    for index in range(len(test_meta['fn'])):
-        focals = test_meta['k'][index]
-        w2cs = test_meta['w2c'][index]
-        fns = test_meta['fn'][index]
-        cam_ids = test_meta['cam_id'][index]
-
-        time = index / len(test_meta['fn'])
-        # breakpoint()
-        for focal, w2c, fn, cam in zip(focals, w2cs, fns, cam_ids):
-            image_path = os.path.join(datadir,"ims")
-            image_name=fn
-            
-            # breakpoint()
-            image = Image.open(os.path.join(datadir,"ims",fn))
-            im_data = np.array(image.convert("RGBA"))
-            # breakpoint()
-            im_data = PILtoTorch(im_data,None)[:3,:,:]
-            # breakpoint()
-            # print(w2c,focal,image_name)
-            camera = setup_camera(w, h, focal, w2c)
-            cam_infos.append({
-                "camera":camera,
-                "time":time,
-                "image":im_data})
-            
-    cam_centers = np.linalg.inv(test_meta['w2c'][0])[:, :3, 3]  # Get scene radius
-    scene_radius = 1.1 * np.max(np.linalg.norm(cam_centers - np.mean(cam_centers, 0)[None], axis=-1))
-    return cam_infos, max_time, scene_radius
-
-def readPanopticSportsinfos(datadir):
-    train_cam_infos, max_time, scene_radius = readPanopticmeta(datadir, "train_meta.json")
-    test_cam_infos,_, _ = readPanopticmeta(datadir, "test_meta.json")
-    nerf_normalization = {
-        "radius":scene_radius,
-        "translate":torch.tensor([0,0,0])
-    }
-
-    ply_path = os.path.join(datadir, "pointd3D.ply")
-
-        # Since this data set has no colmap data, we start with random points
-    plz_path = os.path.join(datadir, "init_pt_cld.npz")
-    data = np.load(plz_path)["data"]
-    xyz = data[:,:3]
-    rgb = data[:,3:6]
-    num_pts = xyz.shape[0]
-    pcd = BasicPointCloud(points=xyz, colors=rgb, normals=np.ones((num_pts, 3)))
-    storePly(ply_path, xyz, rgb)
-    # pcd = fetchPly(ply_path)
-    # breakpoint()
-    scene_info = SceneInfo(point_cloud=pcd,
-                           train_cameras=train_cam_infos,
-                           test_cameras=test_cam_infos,
-                           nerf_normalization=nerf_normalization,
-                           ply_path=ply_path,
-                           maxtime=max_time,
-                           )
-    return scene_info
-
-sceneLoadTypeCallbacks = {
-    # "Colmap": readColmapSceneInfo,
-    # "Blender" : readNerfSyntheticInfo,
-    "Force" : readForceSyntheticInfo,
-    # "dynerf" : readdynerfInfo,
-    # "nerfies": readHyperDataInfos,  # NeRFies & HyperNeRF dataset proposed by [https://github.com/google/hypernerf/releases/tag/v0.1]
-    # "PanopticSports" : readPanopticSportsinfos
-}

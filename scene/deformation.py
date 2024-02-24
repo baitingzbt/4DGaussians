@@ -1,11 +1,3 @@
-import functools
-import math
-import os
-import time
-from tkinter import W
-from typing import Any
-
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -113,7 +105,6 @@ class Deformation(nn.Module):
         self, rays_pts_emb, scales_emb=None, rotations_emb=None, opacity = None, shs_emb=None, 
         time_feature=None, time_emb=None, force_emb=None, prev_hidden=None,
     ):
-        # print(f"defomation.py line 124:\n\tforwarding: time_emb = {time_emb}, prev_hidden = {prev_hidden}", )
         if time_emb is None:
             return self.forward_static(rays_pts_emb[:, :3])
         else:
@@ -130,7 +121,7 @@ class Deformation(nn.Module):
     # TODO: EDIT THIS FUNCTION OR WRITE A NEW ONE FOR FORCE
     def forward_dynamic(self, rays_pts_emb, scales_emb, rotations_emb, opacity_emb, shs_emb, time_feature, time_emb, force_emb, prev_hidden):
         time_input = time_emb[:, :1] if self.args.use_time else None
-        force_input = force_emb[:, 3:7] if self.args.use_force else None # NOTE: drops xyz, keep dir+strength only
+        force_input = force_emb if self.args.use_force else None
         hidden = self.query_time_force(rays_pts_emb, scales_emb, rotations_emb, time_feature, time_input, force_input, prev_hidden)
 
         if self.args.static_mlp:
