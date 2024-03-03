@@ -704,7 +704,9 @@ class GaussianModel:
         l2_time_reg = torch.tensor(0) if l2_time_planes_weight <= 1e-7 else l2_time_planes_weight * self._l2_regulation()
         force_reg = torch.tensor(0) if (not self.args.use_force) or self.args.blend_time_force or force_weight <= 1e-7 \
             else force_weight * self._force_regulation()
-        # breakpoint()
+
+        # time_reg = time_reg.clamp(1e-5) # don't go below 1e-5
+        # plane_reg = plane_reg.clamp(2e-6)
         reg_loss_dict = defaultdict(lambda: torch.tensor(0))
         reg_loss_dict['time_reg'] = time_reg
         reg_loss_dict['plane_reg'] = plane_reg

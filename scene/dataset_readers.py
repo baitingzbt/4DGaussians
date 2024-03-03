@@ -16,10 +16,10 @@ from scene.cameras import Camera
 from typing import List, Set, Any, Optional, Dict
 
 from typing import NamedTuple
-from scene.colmap_loader import read_extrinsics_text, read_intrinsics_text, qvec2rotmat, \
-    read_extrinsics_binary, read_intrinsics_binary, read_points3D_binary, read_points3D_text
-from scene.hyper_loader import Load_hyper_data, format_hyper_data
-import torchvision.transforms as transforms
+# from scene.colmap_loader import read_extrinsics_text, read_intrinsics_text, qvec2rotmat, \
+#     read_extrinsics_binary, read_intrinsics_binary, read_points3D_binary, read_points3D_text
+# from scene.hyper_loader import Load_hyper_data, format_hyper_data
+# import torchvision.transforms as transforms
 import copy
 from utils.graphics_utils import getWorld2View2, focal2fov, fov2focal
 import numpy as np
@@ -32,7 +32,7 @@ from scene.gaussian_model import BasicPointCloud
 from utils.general_utils import PILtoTorch
 from tqdm import tqdm
 
-MAX_FRAME = 180
+MAX_FRAME = 35
 
 class CameraInfo(NamedTuple):
     uid: int
@@ -324,7 +324,9 @@ def readCamerasFromShortTransforms(
     # H, W = contents['height'], contents['width']    # original H, W
     # NEW_H, NEW_W = 600, 600    # target H, W
     force = np.array(contents['force'])[3:]  #  directly drop positions here
-    for frame in contents["frames"]:
+    for idx, frame in enumerate(contents["frames"]):
+        if idx >= MAX_FRAME:
+            break
         image = Image.open(os.path.join(path, frame["file_path"])).resize((600, 600))
         norm_data =  np.array(image.convert("RGBA")) / 255.0
         # assume white_background = True

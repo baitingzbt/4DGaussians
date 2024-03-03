@@ -70,32 +70,56 @@
 
 
 
-CUDA_VISIBLE_DEVICES=2 nohup python train.py \
-    --data_path_train data_new/scene2_force3_250 data_new/scene2_force3_300 data_new/scene2_force3_350 data_new/scene2_force3_380 \
-    --data_path_test data_new/scene2_force3_275 data_new/scene2_force3_325 data_new/scene2_force3_375 data_new/scene2_force3_390 \
-    --n_train_cams 50 50 50 50 \
-    --n_test_cams 2 2 2 2 \
-    --expname scene2_novel_intensity8_cont \
-    --configs arguments/dnerf/force_blend.py \
-    --start_checkpoint /home/baiting/4DGaussians/output/scene2_novel_intensity8/chkpnt_fine_99999.pth \
-    --wandb > scene2_novel_intensity8_cont.out \
-&
-CUDA_VISIBLE_DEVICES=3 nohup python train.py \
-    --data_path_train data_new/scene2_force3_250 data_new/scene2_force3_300 data_new/scene2_force3_350 data_new/scene2_force3_380 \
-    --data_path_test data_new/scene2_force3_275 data_new/scene2_force3_325 data_new/scene2_force3_375 data_new/scene2_force3_390 \
-    --n_train_cams 50 50 50 50 \
-    --n_test_cams 2 2 2 2 \
-    --expname scene2_novel_forceplane \
-    --configs arguments/dnerf/force_sep.py \
-    --wandb > scene2_novel_forceplane.out
+# CUDA_VISIBLE_DEVICES=2 nohup python train.py \
+#     --data_path_train data_new/scene2_force3_250 data_new/scene2_force3_300 data_new/scene2_force3_350 data_new/scene2_force3_380 \
+#     --data_path_test data_new/scene2_force3_275 data_new/scene2_force3_325 data_new/scene2_force3_375 data_new/scene2_force3_390 \
+#     --n_train_cams 50 50 50 50 \
+#     --n_test_cams 2 2 2 2 \
+#     --expname scene2_novel_intensity8_cont \
+#     --configs arguments/dnerf/force_blend.py \
+#     --start_checkpoint /home/baiting/4DGaussians/output/scene2_novel_intensity8/chkpnt_fine_99999.pth \
+#     --wandb > scene2_novel_intensity8_cont.out
+
+# CUDA_VISIBLE_DEVICES=2 nohup python train.py \
+#     --data_path_train data_new/scene2_force3_250 data_new/scene2_force3_300 data_new/scene2_force3_350 data_new/scene2_force3_380 \
+#     --data_path_test data_new/scene2_force3_275 data_new/scene2_force3_325 data_new/scene2_force3_375 data_new/scene2_force3_390 \
+#     --n_train_cams 50 50 50 50 \
+#     --n_test_cams 2 2 2 2 \
+#     --expname scene2_opacity_yes \
+#     --configs arguments/dnerf/force_blend.py \
+#     --wandb > scene2_opacity_yes.out \
 # &
 # CUDA_VISIBLE_DEVICES=3 nohup python train.py \
-#     --data_path_train data_new/scene2_force1 data_new/scene2_force2 \
-#     --data_path_test data_new/scene2_force1 data_new/scene2_force2 \
-#     --n_train_cams 50 50 \
-#     --n_test_cams 3 3 \
-#     --expname scene2_test_forceplane \
-#     --configs arguments/dnerf/force.py \
-#     --wandb > scene2_test_forceplane.out
+#     --data_path_train \
+#         data_new/scene2_dir_train1 data_new/scene2_dir_train2 data_new/scene2_dir_train3 data_new/scene2_dir_train4 \
+#         data_new/scene2_dir_train5 data_new/scene2_dir_train6 data_new/scene2_dir_train7 data_new/scene2_dir_train8 \
+#     --data_path_test \
+#         data_new/scene2_dir_test1 data_new/scene2_dir_test2 data_new/scene2_dir_test3 data_new/scene2_dir_test4 \
+#     --n_train_cams 50 50 50 50 50 50 50 50 \
+#     --n_test_cams 3 3 3 3 \
+#     --expname scene2_new_dir1_opacity_yes \
+#     --configs arguments/dnerf/force_blend.py \
+#     --wandb > scene2_new_dir1_opacity_yes.out
 
+
+# CUDA_VISIBLE_DEVICES=3 nohup python train.py \
+#     --data_path_train \
+#         data_new/scene2_dir_train1 data_new/scene2_dir_train2 data_new/scene2_dir_train5 data_new/scene2_dir_train6 \
+#     --data_path_test \
+#         data_new/scene2_dir_test2 data_new/scene2_dir_test3 data_new/scene2_dir_test5 data_new/scene2_dir_test6 \
+#     --n_train_cams 50 50 50 50 \
+#     --n_test_cams 3 3 3 3 \
+#     --expname scene2_new_dir1_less_yes_controlledreg \
+#     --configs arguments/dnerf/force_blend.py \
+#     --wandb > scene2_new_dir1_less_yes_controlledreg.out
+
+
+CUDA_VISIBLE_DEVICES=1 nohup python train.py \
+    --data_path_train data_new/scene2_force3_250 data_new/scene2_force3_300 data_new/scene2_force3_350 data_new/scene2_force3_380 \
+    --data_path_test data_new/scene2_force3_275 data_new/scene2_force3_325 data_new/scene2_force3_375 data_new/scene2_force3_390 \
+    --n_train_cams 50 50 50 50 \
+    --n_test_cams 3 3 3 3 \
+    --expname scene2_novel_intensity_anchor1 \
+    --configs arguments/dnerf/force_blend.py \
+    --wandb > scene2_novel_intensity_anchor1.out
 # CUDA_VISIBLE_DEVICES=3 python train.py --data_path_train data_new/scene2_force1 --data_path_test data_new/scene2_force1 --n_train_cams 5 --n_test_cams 2 --expname scene2_test_forceplane --configs arguments/dnerf/less_coarse.py

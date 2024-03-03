@@ -186,7 +186,7 @@ class HexPlaneField(nn.Module):
     def get_aabb(self):
         return self.aabb[0], self.aabb[1]
     
-    def set_aabb(self,xyz_max, xyz_min):
+    def set_aabb(self, xyz_max, xyz_min):
         aabb = torch.tensor([xyz_max, xyz_min], dtype=torch.float32)
         self.aabb = nn.Parameter(aabb,requires_grad=False)
         # print("Voxel Plane: set aabb=", self.aabb)

@@ -14,7 +14,7 @@ import os, sys
 import torch
 from random import randint
 from utils.loss_utils import l1_loss, ssim, l2_loss, lpips_loss
-from gaussian_renderer.renderer import render, get_pos_t0
+from gaussian_renderer.renderer import render, ANCHORS
 import sys
 from scene import Scene, GaussianModel
 from scene.cameras import Camera
@@ -32,7 +32,7 @@ from copy import deepcopy
 from collections import defaultdict
 
 to8b = lambda x : (255 * np.clip(x.cpu().numpy(), 0, 1)).astype(np.uint8)
-FRAMES_EACH = 40
+FRAMES_EACH = 35
 EVAL_EVERY = 10000 # 10000
 SAVE_EVERY = 50000
 LOG_EVERY = 500 # 500
@@ -53,7 +53,12 @@ def scene_reconstruction(
     save_pointclound: bool = True,
     weighted_loss: int = -1
 ):
-    train_iter = opt.coarse_iterations if stage == 'coarse' else opt.iterations
+    if stage == "coarse":
+        train_iter = opt.coarse_iterations
+    elif stage == "anchor":
+        train_iter = opt.anchor_iterations
+    elif stage == "fine":
+        train_iter = opt.iterations
     first_iter = 0
     gaussians.training_setup(opt)
     if checkpoint:
@@ -81,6 +86,9 @@ def scene_reconstruction(
     n_train_cams = dataset.n_train_cams
 
     train_cams_rdm = deepcopy(train_cams)
+    # for cam in train_cams_rdm:
+    #     print(cam.time)
+    # breakpoint()
     random.shuffle(train_cams_rdm)
     _train_cams = [randint(0, cams-1) + sum(n_train_cams[:i]) for i, cams in enumerate(n_train_cams)]
     train_views = []
@@ -91,8 +99,6 @@ def scene_reconstruction(
     batch_size = opt.batch_size
     shuffle_inter = int(len(train_cams) / batch_size) + 1
     timer.start()
-    image_tensor = torch.zeros(size=(batch_size, 3, 600, 600), device='cuda')
-    gt_image_tensor = torch.zeros(size=(batch_size, 3, 600, 600), device='cuda')
     for iteration in range(first_iter, final_iter):        
         # print(f"{iteration}")
         gaussians.update_learning_rate(iteration)
@@ -103,7 +109,6 @@ def scene_reconstruction(
 
         # Pick a random Camera
         if weighted_loss == -1:
-            # shuffle the two lists randomly but keep the same relative order
             # reshuffle after going through entire data once
             if iteration == first_iter or iteration % shuffle_inter == 0:
                 random.shuffle(train_cams_rdm)
@@ -111,13 +116,16 @@ def scene_reconstruction(
             query_idxs = [((iteration * batch_size) + _i) % len(train_cams_rdm) for _i in range(batch_size)]
         
         points = gaussians.get_xyz.shape[0]
+        image_tensor = torch.zeros(size=(batch_size, 3, 600, 600), device='cuda')
+        gt_image_tensor = torch.zeros(size=(batch_size, 3, 600, 600), device='cuda')
         visibility_tensor = torch.zeros(size=(batch_size, points), device='cuda')
         radii_tensor = torch.zeros(size=(batch_size, points), device='cuda')
         viewspace_point_tensor = []
         total_momentum_reg = 0
+        total_opacity_reg = 0
         for _i, query_idx in enumerate(query_idxs):
             train_view = train_cams_rdm[query_idx]
-            image, viewspace_point, visibility_filter, radii, depth, momentum_reg \
+            image, viewspace_point, visibility_filter, radii, depth, momentum_reg, opacity_reg \
                 = render(train_view, gaussians, pipe, background, stage=stage)
             image_tensor[_i] = image
             gt_image_tensor[_i] = train_view.original_image.cuda()
@@ -125,6 +133,7 @@ def scene_reconstruction(
             radii_tensor[_i] = radii
             visibility_tensor[_i] = visibility_filter
             total_momentum_reg += 0.001 * momentum_reg
+            total_opacity_reg += opacity_reg
         radii = radii_tensor.max(dim=0).values
         visibility_filter = visibility_tensor.any(dim=0)
         # breakpoint()
@@ -140,17 +149,20 @@ def scene_reconstruction(
             )
             loss += tv_loss_dict['total_reg']
             loss += total_momentum_reg
+            loss += total_opacity_reg
         else:
             tv_loss_dict = defaultdict(lambda: torch.tensor(0)) # assume to be 0 for coarse
 
-        if opt.lambda_dssim != 0:
-            ssim_loss = ssim(image_tensor, gt_image_tensor)
-            loss += opt.lambda_dssim * (1.0-ssim_loss)
+        # total_momentum_reg = total_momentum_reg.clamp(1e-5)
+        
+        # if opt.lambda_dssim != 0:
+        #     ssim_loss = ssim(image_tensor, gt_image_tensor)
+        #     loss += opt.lambda_dssim * (1.0-ssim_loss)
         
         # if opt.lambda_lpips !=0:
         #     lpipsloss = lpips_loss(image_tensor,gt_image_tensor,lpips_model)
         #     loss += opt.lambda_lpips * lpipsloss
-
+        # if iteration != first_iter:
         loss.backward()
 
         # get_pos_t0(gaussians)
@@ -167,7 +179,8 @@ def scene_reconstruction(
                     "Loss": round(ema_loss_for_log, 7),
                     "psnr": round(psnr_.item(), 2),
                     "point": points,
-                    "mom_reg": total_momentum_reg.item()
+                    "mom_reg": total_momentum_reg.item(),
+                    "opa_reg": total_opacity_reg.item()
                 }
                 for aux_loss_name, aux_loss_val in tv_loss_dict.items():
                     infos[aux_loss_name] = aux_loss_val.item()
@@ -209,7 +222,7 @@ def scene_reconstruction(
 
             timer.start()
             # Densification
-            if iteration < opt.densify_until_iter :
+            if iteration < opt.densify_until_iter and stage != "anchor":
                 # Keep track of max radii in image-space for pruning
                 gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter].cuda(), radii[visibility_filter].cuda())
                 gaussians.add_densification_stats(viewspace_point_tensor_grad, visibility_filter)
@@ -221,15 +234,15 @@ def scene_reconstruction(
                     opacity_threshold = opt.opacity_threshold_fine_init - iteration * (opt.opacity_threshold_fine_init - opt.opacity_threshold_fine_after) / opt.densify_until_iter
                     densify_threshold = opt.densify_grad_threshold_fine_init - iteration * (opt.densify_grad_threshold_fine_init - opt.densify_grad_threshold_after) / opt.densify_until_iter
                 
-                if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0 and gaussians.get_xyz.shape[0] < 150000:
+                if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0 and gaussians.get_xyz.shape[0] < 40000:
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
                     gaussians.densify(densify_threshold, opacity_threshold, scene.cameras_extent, size_threshold, 5, 5, scene.model_path, iteration, stage)
 
-                if iteration > opt.pruning_from_iter and iteration % opt.pruning_interval == 0 and gaussians.get_xyz.shape[0] > 100000:
+                if iteration > opt.pruning_from_iter and iteration % opt.pruning_interval == 0 and gaussians.get_xyz.shape[0] > 30000:
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
                     gaussians.prune(densify_threshold, opacity_threshold, scene.cameras_extent, size_threshold)
                     
-                if iteration % opt.densification_interval == 0 and gaussians.get_xyz.shape[0] < 150000 and opt.add_point:
+                if iteration % opt.densification_interval == 0 and gaussians.get_xyz.shape[0] < 40000 and opt.add_point:
                     gaussians.grow(5, 5, scene.model_path, iteration,stage)
 
                 if iteration % opt.opacity_reset_interval == 0:
@@ -251,6 +264,11 @@ def training(dataset, hyper, opt, pipe, checkpoint, expname, use_wandb, weighted
     scene_reconstruction(
         dataset, opt, hyper, pipe, checkpoint, gaussians,
         scene, "coarse", timer,
+        use_wandb, save_video=True, save_images=False, save_pointclound=False, weighted_loss=weighted_loss
+    )
+    scene_reconstruction(
+        dataset, opt, hyper, pipe, checkpoint, gaussians,
+        scene, "anchor", timer,
         use_wandb, save_video=True, save_images=False, save_pointclound=False, weighted_loss=weighted_loss
     )
     scene_reconstruction(
@@ -278,7 +296,7 @@ if __name__ == "__main__":
     torch.set_default_dtype(torch.float32)
     torch.set_default_tensor_type('torch.FloatTensor')
     parser = ArgumentParser(description="Training script parameters")
-    setup_seed(6666)
+    setup_seed(42)
     lp = ModelParams(parser)
     op = OptimizationParams(parser)
     pp = PipelineParams(parser)

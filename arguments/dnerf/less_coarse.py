@@ -16,6 +16,7 @@ if USE_FORCE and not BLEND_TIME_FORCE:
 
 OptimizationParams = dict(
     coarse_iterations = 100, # 10000, # default: 3000
+    anchor_iterations = 5000,
     iterations = 5000000,
     batch_size = 8
 )
