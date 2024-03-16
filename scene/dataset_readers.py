@@ -16,10 +16,6 @@ from scene.cameras import Camera
 from typing import List, Set, Any, Optional, Dict
 
 from typing import NamedTuple
-# from scene.colmap_loader import read_extrinsics_text, read_intrinsics_text, qvec2rotmat, \
-#     read_extrinsics_binary, read_intrinsics_binary, read_points3D_binary, read_points3D_text
-# from scene.hyper_loader import Load_hyper_data, format_hyper_data
-# import torchvision.transforms as transforms
 import copy
 from utils.graphics_utils import getWorld2View2, focal2fov, fov2focal
 import numpy as np
@@ -32,7 +28,7 @@ from scene.gaussian_model import BasicPointCloud
 from utils.general_utils import PILtoTorch
 from tqdm import tqdm
 
-MAX_FRAME = 35
+MAX_FRAME = 40
 
 class CameraInfo(NamedTuple):
     uid: int
@@ -52,8 +48,8 @@ class CameraInfo(NamedTuple):
    
 class SceneInfo(NamedTuple):
     point_cloud: BasicPointCloud
-    train_cameras: List[CameraInfo]
-    test_cameras: List[CameraInfo]
+    train_cameras: List[Camera]
+    test_cameras: List[Camera]
     nerf_normalization: dict
     ply_path: str
     maxtime: int
@@ -339,6 +335,7 @@ def readCamerasFromShortTransforms(
                 FoVy=contents['camera_angle_x'], # assume H and W are the same to save compute
                 image=torch.tensor(arr, dtype=torch.float32).permute(2, 0, 1),
                 time=mapper[frame["time"]],
+                frame_step=idx,
                 force=force,
                 force_idx=force_idx
             )
@@ -378,16 +375,16 @@ def readForceSyntheticInfo(
         # readCamerasFromTransforms, readCamerasFromShortTransforms
         return readCamerasFromShortTransforms(cam_path, "transforms.json", timestamp_mapper, force_idx)
 
-    train_cam_infos = []
-    test_cam_infos = []
+    all_train_cams: List[Camera] = []
+    all_test_cams: List[Camera] = []
     for force_idx, (_path, train_cams) in enumerate(zip(paths_train, n_train_cams)):
         for i in tqdm(range(train_cams), desc='Reading Train'):
-            train_cam_infos += helper(_path, i, 'train', force_idx)
+            all_train_cams += helper(_path, i, 'train', force_idx)
     for force_idx, (_path, test_cams) in enumerate(zip(paths_test, n_test_cams)):
         for i in tqdm(range(test_cams), desc='Reading Test'):
-            test_cam_infos += helper(_path, i, 'test', force_idx)
+            all_test_cams += helper(_path, i, 'test', force_idx)
 
-    nerf_normalization = getNerfppNorm(train_cam_infos)
+    nerf_normalization = getNerfppNorm(all_train_cams)
     ply_path = os.path.join(paths[0], "fused.ply") # NOTE: PLACEHOLDER?
     num_pts = 2000
     # We create random points inside the bounds of the synthetic Blender scenes
@@ -396,8 +393,8 @@ def readForceSyntheticInfo(
     pcd = BasicPointCloud(points=xyz, colors=SH2RGB(shs), normals=np.zeros((num_pts, 3)))
     scene_info = SceneInfo(
         point_cloud=pcd,
-        train_cameras=train_cam_infos,
-        test_cameras=test_cam_infos,
+        train_cameras=all_train_cams,
+        test_cameras=all_test_cams,
         nerf_normalization=nerf_normalization,
         ply_path=ply_path,
         maxtime=max_time

@@ -66,6 +66,7 @@ class Camera():
         FoVy,
         image,
         time = 0,
+        frame_step = 0,
         force: np.ndarray = None,
         force_idx: int = -1
     ) -> None:
@@ -74,6 +75,7 @@ class Camera():
         self.FoVx = FoVx
         self.FoVy = FoVy
         self.time = time
+        self.frame_step = frame_step
         self.data_device = torch.device("cuda")
         self.original_image = image.clamp(0.0, 1.0)[:3, :, :]
         self.image_width = self.original_image.shape[2]
@@ -85,4 +87,5 @@ class Camera():
         self.world_view_transform = torch.tensor(getWorld2View2(R, T,  np.array([0.0, 0.0, 0.0]), 1.), dtype=torch.float32).transpose(0, 1)
         projection_matrix = getProjectionMatrix(znear=0.01, zfar=100., fovX=self.FoVx, fovY=self.FoVy).transpose(0,1) # 
         self.full_proj_transform = (self.world_view_transform.unsqueeze(0).bmm(projection_matrix.unsqueeze(0))).squeeze(0)
-        self.camera_center = self.world_view_transform.inverse()[3, :3] 
+        self.camera_center = self.world_view_transform.inverse()[3, :3]
+        self.prev_state = None

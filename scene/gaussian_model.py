@@ -35,15 +35,11 @@ class GaussianModel:
             actual_covariance = L @ L.transpose(1, 2)
             symm = strip_symmetric(actual_covariance)
             return symm
-        
         self.scaling_activation = torch.exp
         self.scaling_inverse_activation = torch.log
-
         self.covariance_activation = build_covariance_from_scaling_rotation
-
         self.opacity_activation = torch.sigmoid
         self.inverse_opacity_activation = inverse_sigmoid
-
         self.rotation_activation = torch.nn.functional.normalize
 
 
@@ -246,14 +242,12 @@ class GaussianModel:
         for i in range(self._rotation.shape[1]):
             l.append('rot_{}'.format(i))
         return l
+    
     def compute_deformation(self,time):
-        
         deform = self._deformation[:,:,:time].sum(dim=-1)
         xyz = self._xyz + deform
         return xyz
-    # def save_ply_dynamic(path):
-    #     for time in range(self._deformation.shape(-1)):
-    #         xyz = self.compute_deformation(time)
+
     def load_model(self, path):
         print("loading model from exists{}".format(path))
         weight_dict = torch.load(os.path.join(path,"deformation.pth"),map_location="cuda")
@@ -266,14 +260,14 @@ class GaussianModel:
         if os.path.exists(os.path.join(path, "deformation_accum.pth")):
             self._deformation_accum = torch.load(os.path.join(path, "deformation_accum.pth"),map_location="cuda")
         self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
-        # print(self._deformation.deformation_net.grid.)
+    
     def save_deformation(self, path):
         torch.save(self._deformation.state_dict(),os.path.join(path, "deformation.pth"))
         torch.save(self._deformation_table,os.path.join(path, "deformation_table.pth"))
         torch.save(self._deformation_accum,os.path.join(path, "deformation_accum.pth"))
+    
     def save_ply(self, path):
         mkdir_p(os.path.dirname(path))
-
         xyz = self._xyz.detach().cpu().numpy()
         normals = np.zeros_like(xyz)
         f_dc = self._features_dc.detach().transpose(1, 2).flatten(start_dim=1).contiguous().cpu().numpy()
@@ -281,9 +275,7 @@ class GaussianModel:
         opacities = self._opacity.detach().cpu().numpy()
         scale = self._scaling.detach().cpu().numpy()
         rotation = self._rotation.detach().cpu().numpy()
-        
         dtype_full = [(attribute, 'f4') for attribute in self.construct_list_of_attributes()]
-
         elements = np.empty(xyz.shape[0], dtype=dtype_full)
         attributes = np.concatenate((xyz, normals, f_dc, f_rest, opacities, scale, rotation), axis=1)
         elements[:] = list(map(tuple, attributes))
@@ -328,7 +320,6 @@ class GaussianModel:
         rots = np.zeros((xyz.shape[0], len(rot_names)))
         for idx, attr_name in enumerate(rot_names):
             rots[:, idx] = np.asarray(plydata.elements[0][attr_name])
-
         self._xyz = nn.Parameter(torch.tensor(xyz, dtype=torch.float32, device="cuda").requires_grad_(True))
         self._features_dc = nn.Parameter(torch.tensor(features_dc, dtype=torch.float32, device="cuda").transpose(1, 2).contiguous().requires_grad_(True))
         self._features_rest = nn.Parameter(torch.tensor(features_extra, dtype=torch.float32, device="cuda").transpose(1, 2).contiguous().requires_grad_(True))
@@ -338,17 +329,17 @@ class GaussianModel:
         self.active_sh_degree = self.max_sh_degree
 
     def replace_tensor_to_optimizer(self, tensor, name):
+        if name == 'opacity':
+            breakpoint()
         optimizable_tensors = {}
         for group in self.optimizer.param_groups:
             if group["name"] == name:
                 stored_state = self.optimizer.state.get(group['params'][0], None)
                 stored_state["exp_avg"] = torch.zeros_like(tensor)
                 stored_state["exp_avg_sq"] = torch.zeros_like(tensor)
-
                 del self.optimizer.state[group['params'][0]]
                 group["params"][0] = nn.Parameter(tensor.requires_grad_(True))
                 self.optimizer.state[group['params'][0]] = stored_state
-
                 optimizable_tensors[group["name"]] = group["params"][0]
         return optimizable_tensors
 
@@ -362,7 +353,6 @@ class GaussianModel:
             if stored_state is not None:
                 stored_state["exp_avg"] = stored_state["exp_avg"][mask]
                 stored_state["exp_avg_sq"] = stored_state["exp_avg_sq"][mask]
-
                 del self.optimizer.state[group['params'][0]]
                 group["params"][0] = nn.Parameter((group["params"][0][mask].requires_grad_(True)))
                 self.optimizer.state[group['params'][0]] = stored_state
@@ -376,7 +366,6 @@ class GaussianModel:
     def prune_points(self, mask):
         valid_points_mask = ~mask
         optimizable_tensors = self._prune_optimizer(valid_points_mask)
-
         self._xyz = optimizable_tensors["xyz"]
         self._features_dc = optimizable_tensors["f_dc"]
         self._features_rest = optimizable_tensors["f_rest"]
@@ -397,14 +386,11 @@ class GaussianModel:
             extension_tensor = tensors_dict[group["name"]]
             stored_state = self.optimizer.state.get(group['params'][0], None)
             if stored_state is not None:
-
                 stored_state["exp_avg"] = torch.cat((stored_state["exp_avg"], torch.zeros_like(extension_tensor)), dim=0)
                 stored_state["exp_avg_sq"] = torch.cat((stored_state["exp_avg_sq"], torch.zeros_like(extension_tensor)), dim=0)
-
                 del self.optimizer.state[group['params'][0]]
                 group["params"][0] = nn.Parameter(torch.cat((group["params"][0], extension_tensor), dim=0).requires_grad_(True))
                 self.optimizer.state[group['params'][0]] = stored_state
-
                 optimizable_tensors[group["name"]] = group["params"][0]
             else:
                 group["params"][0] = nn.Parameter(torch.cat((group["params"][0], extension_tensor), dim=0).requires_grad_(True))
@@ -422,7 +408,6 @@ class GaussianModel:
             "rotation" : new_rotation,
             # "deformation": new_deformation
         }
-
         optimizable_tensors = self.cat_tensors_to_optimizer(d)
         self._xyz = optimizable_tensors["xyz"]
         self._features_dc = optimizable_tensors["f_dc"]
@@ -430,8 +415,6 @@ class GaussianModel:
         self._opacity = optimizable_tensors["opacity"]
         self._scaling = optimizable_tensors["scaling"]
         self._rotation = optimizable_tensors["rotation"]
-        # self._deformation = optimizable_tensors["deformation"]
-        
         self._deformation_table = torch.cat([self._deformation_table,new_deformation_table],-1)
         self.xyz_gradient_accum = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
         self._deformation_accum = torch.zeros((self.get_xyz.shape[0], 3), device="cuda")
@@ -444,7 +427,6 @@ class GaussianModel:
         padded_grad = torch.zeros((n_init_points), device="cuda")
         padded_grad[:grads.shape[0]] = grads.squeeze()
         selected_pts_mask = torch.where(padded_grad >= grad_threshold, True, False)
-
         selected_pts_mask = torch.logical_and(selected_pts_mask,
                                               torch.max(self.get_scaling, dim=1).values > self.percent_dense*scene_extent)
         if not selected_pts_mask.any():
@@ -502,17 +484,11 @@ class GaussianModel:
         # if opt.add_point:
         # selected_xyz, grow_xyz = self.add_point_by_mask(selected_pts_mask_grow.to(self.get_xyz.device), self.displacement_scale)
         self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation, new_deformation_table)
-        # print("被动增加点云：",selected_xyz.shape[0])
-        # print("主动增加点云：",selected_pts_mask.sum())
-        # if model_path is not None and iteration is not None:
-        #     point = combine_pointcloud(self.get_xyz.detach().cpu().numpy(), new_xyz.detach().cpu().numpy(), selected_xyz.detach().cpu().numpy())
-        #     write_path = os.path.join(model_path,"add_point_cloud")
-        #     os.makedirs(write_path,exist_ok=True)
-        #     o3d.io.write_point_cloud(os.path.join(write_path,f"iteration_{stage}{iteration}.ply"),point)
-        #     print("write output.")
+
     @property
     def get_aabb(self):
         return self._deformation.get_aabb
+
     def get_displayment(self,selected_point, point, perturb):
         xyz_max, xyz_min = self.get_aabb
         displacements = torch.randn(selected_point.shape[0], 3).to(selected_point) * perturb
@@ -523,12 +499,12 @@ class GaussianModel:
         mask_c = mask_a & mask_b
         mask_d = mask_c.all(dim=1)
         final_point = final_point[mask_d]
-        return final_point, mask_d    
+        return final_point, mask_d
+
     def add_point_by_mask(self, selected_pts_mask, perturb=0):
         selected_xyz = self._xyz[selected_pts_mask] 
         new_xyz, mask = self.get_displayment(selected_xyz, self.get_xyz.detach(),perturb)
         # displacements = torch.randn(selected_xyz.shape[0], 3).to(self._xyz) * perturb
-
         # new_xyz = selected_xyz + displacements
         # - 0.001 * self._xyz.grad[selected_pts_mask]
         new_features_dc = self._features_dc[selected_pts_mask][mask]
@@ -541,6 +517,7 @@ class GaussianModel:
 
         self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation, new_deformation_table)
         return selected_xyz, new_xyz
+
     def downsample_point(self, point_cloud):
         if not hasattr(self,"voxel_size"):
             self.voxel_size = 8  
@@ -557,6 +534,7 @@ class GaussianModel:
         downsampled_point_mask = torch.zeros((point_cloud.shape[0]), dtype=torch.bool).to(point_downsample.device)
         downsampled_point_mask[downsampled_point_index]=True
         return downsampled_point_mask
+    
     def grow(self, density_threshold=20, displacement_scale=20, model_path=None, iteration=None, stage=None):
         if not hasattr(self,"voxel_size"):
             self.voxel_size = 8  
@@ -575,12 +553,10 @@ class GaussianModel:
             self.density_threshold /= 2
             self.displacement_scale /= 2
             print("reduce diplacement_scale to: ",self.displacement_scale)
-
         elif new_points.shape[0] == 0:
             print("no point added")
             return
         global_mask = torch.zeros((point_cloud.shape[0]), dtype=torch.bool)
-
         global_mask[downsampled_point_index] = low_density_index
         global_mask
         selected_xyz, new_xyz = self.add_point_by_mask(global_mask.to(self.get_xyz.device), self.displacement_scale)
@@ -605,17 +581,17 @@ class GaussianModel:
     def densify(self, max_grad, min_opacity, extent, max_screen_size, density_threshold, displacement_scale, model_path=None, iteration=None, stage=None):
         grads = self.xyz_gradient_accum / self.denom
         grads[grads.isnan()] = 0.0
-
         self.densify_and_clone(grads, max_grad, extent, density_threshold, displacement_scale, model_path, iteration, stage)
         self.densify_and_split(grads, max_grad, extent)
+    
     def standard_constaint(self):
-        
         means3D = self._xyz.detach()
         scales = self._scaling.detach()
         rotations = self._rotation.detach()
         opacity = self._opacity.detach()
         time =  torch.tensor(0).to("cuda").repeat(means3D.shape[0],1)
-        means3D_deform, scales_deform, rotations_deform, _, hidden = self._deformation(means3D, scales, rotations, opacity, time)
+        means3D_deform, scales_deform, rotations_deform, _, hidden \
+            = self._deformation.forward_dynamic(means3D, scales, rotations, opacity, time)
         position_error = (means3D_deform - means3D)**2
         rotation_error = (rotations_deform - rotations)**2 
         scaling_erorr = (scales_deform - scales)**2
@@ -635,7 +611,6 @@ class GaussianModel:
         for name, weight in self._deformation.named_parameters():
             if weight.requires_grad:
                 if weight.grad is None:
-                    
                     print(name," :",weight.grad)
                 else:
                     if weight.grad.mean() != 0:
@@ -704,7 +679,6 @@ class GaussianModel:
         l2_time_reg = torch.tensor(0) if l2_time_planes_weight <= 1e-7 else l2_time_planes_weight * self._l2_regulation()
         force_reg = torch.tensor(0) if (not self.args.use_force) or self.args.blend_time_force or force_weight <= 1e-7 \
             else force_weight * self._force_regulation()
-
         # time_reg = time_reg.clamp(1e-5) # don't go below 1e-5
         # plane_reg = plane_reg.clamp(2e-6)
         reg_loss_dict = defaultdict(lambda: torch.tensor(0))

@@ -181,6 +181,15 @@ class HexPlaneField(nn.Module):
         #     nn.ReLU(),
         #     nn.Linear(self.recur_feat_dim, self.feat_dim)
         # )
+            
+        # [x_prev, y_prev, z_prev, x, y, z] -> [hidden1, hidden2, hidden3]
+        # self.pts_embedder = nn.Sequential(
+        #     nn.Linear(6, 6),
+        #     nn.ReLU(),
+        #     nn.Linear(6, 6),
+        #     nn.ReLU(),
+        #     nn.Linear(6, 3)
+        # )
 
     @property
     def get_aabb(self):
@@ -194,11 +203,15 @@ class HexPlaneField(nn.Module):
     def get_density(
         self,
         pts: torch.Tensor,
+        # prev_pts: Optional[torch.Tensor] = None,
         time: Optional[torch.Tensor] = None,
         force: Optional[torch.Tensor] = None
     ):
         """Computes and returns the densities."""
         pts = normalize_aabb(pts, self.aabb)
+        # if prev_pts is not None:
+        #     prev_pts = normalize_aabb(prev_pts, self.aabb)
+        #     pts = self.pts_embedder(torch.cat((pts, prev_pts), dim=1))
         if time is not None:
             pts = torch.cat((pts, time), dim=-1)  # [n_rays, n_samples, 4 OR 10]
         if force is not None:
@@ -218,11 +231,10 @@ class HexPlaneField(nn.Module):
     def forward(
         self,
         pts: torch.Tensor,
+        prev_pts: Optional[torch.Tensor] = None,
         time: Optional[torch.Tensor] = None,
         force: Optional[torch.Tensor] = None,
-        prev_features: Optional[torch.Tensor] = None,
     ):
-        # print(f"input prev_feat: {prev_features}")
         features = self.get_density(pts, time, force)
         # if prev_features is None:
         #     prev_features = torch.zeros((features.shape[0], int(self.feat_dim / 2)), device=features.device, dtype=torch.float32)

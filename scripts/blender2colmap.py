@@ -31,10 +31,10 @@ imagecolmap_dir = os.path.join(root_dir,"image_colmap")
 if not os.path.exists(imagecolmap_dir):
     os.makedirs(imagecolmap_dir)
 
-image_dir = os.path.join(root_dir)
+image_dir = os.path.join(root_dir, 'test', 'cam_0')
 images = os.listdir(image_dir)
 images.sort()
-camera_json = os.path.join(root_dir,"transforms_train.json")
+camera_json = os.path.join(root_dir, 'test', 'cam_0', "transforms.json")
 
 
 with open (camera_json) as f:
@@ -76,8 +76,8 @@ for frame in meta['frames']:
     print(idx,"SIMPLE_PINHOLE",image_size[0],image_size[1],focal[0],image_size[0]/2,image_size[1]/2,file=object_cameras_file)
     idx+=1
     # breakpoint()
-    print(os.path.join(image_dir,frame['file_path']),os.path.join(imagecolmap_dir,frame['file_path'].split('/')[-1]+".png"))
-    shutil.copy(os.path.join(image_dir,frame['file_path']+".png"),os.path.join(imagecolmap_dir,frame['file_path'].split('/')[-1]+".png"))
+    print("\n\n123", os.path.join(image_dir,frame['file_path']), os.path.join(imagecolmap_dir,frame['file_path'].split('/')[-1]), "\n\n")
+    shutil.copy(os.path.join(image_dir, frame['file_path']), os.path.join(imagecolmap_dir,frame['file_path'].split('/')[-1]))
 # write camera infomation.
 # print(1,"SIMPLE_PINHOLE",image_size[0],image_size[1],focal[0],image_sizep0/2,image_size[1]/2,file=object_cameras_file)
 object_point_file = open(os.path.join(colmap_dir,"points3D.txt"),"w")

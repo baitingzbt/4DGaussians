@@ -10,7 +10,7 @@ from scene.cameras import Camera
 from gaussian_renderer.renderer import render
 from scene import Scene
 import wandb
-from typing import List, Union, Tuple
+from typing import List, Union, Tuple, Dict
 from .image_utils import psnr_np
 
 FONT = ImageFont.truetype('./utils/TIMES.TTF', size=40) # 选择字体和字体大小
@@ -54,7 +54,7 @@ def render_training_image(
         if save_images:
             image_with_labels.save(path)
         image_with_label_arr = np.array(image_with_labels)
-        return image_with_label_arr # , hidden
+        return image_with_label_arr
     
     render_base_path = os.path.join(scene.model_path, f"{stage}_render")
     point_cloud_path = os.path.join(render_base_path, "pointclouds")

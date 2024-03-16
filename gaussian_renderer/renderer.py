@@ -17,29 +17,53 @@ from scene.cameras import Camera
 from utils.sh_utils import eval_sh
 import numpy as np
 
-ANCHORS = np.array([0, 0.5, 1.0])
+# ANCHORS = np.array([
+#     0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1.0
+# ])
+ANCHORS = np.array([
+    0, 0.5, 1.0
+])
+# [0-0.25, 0.25-0.75, 0.75-1.0]
+# [0,      0.5,        1.0]
+
+# [0/40,  1/40, ..., 39/40]
 def cast_time_to_anchor(t: float) -> float:
     return float(ANCHORS[np.argmin(np.abs(ANCHORS - t))])
 
-# def get_pos_t0(pc: GaussianModel):
-#     means3D = pc.get_xyz
-#     scales = pc._scaling
-#     rotations = pc._rotation
-#     opacity = pc._opacity
-#     time = torch.tensor(0.0).to(means3D.device).repeat(means3D.shape[0], 1)
-#     # pc._deformation.forward(means3D, scales, rotations, opacity, shs, time, force)
-#     deformation_point = pc._deformation_table
-#     t_0_points, _, _, _, _ =  pc._deformation(
-#         means3D[deformation_point],
-#         scales[deformation_point], 
-#         rotations[deformation_point],
-#         opacity[deformation_point],
-#         time[deformation_point]
-#     )
-#     means3D_final = torch.zeros_like(means3D)
-#     means3D_final[deformation_point] =  t_0_points
-#     means3D_final[~deformation_point] = means3D[~deformation_point]
-#     return means3D_final
+
+def render_for_state(
+    cam: Camera,
+    pc: GaussianModel,
+):
+    # Set up rasterization configuration
+    n_points = pc.get_xyz.shape[0]
+    device = pc.get_xyz.device
+    time = torch.tensor(cam.time).to(dtype=torch.float32, device=device).repeat(n_points, 1)
+    force = torch.tensor(cam.force).to(dtype=torch.float32, device=device).repeat(n_points, 1)
+    if cam.prev_state is not None:
+        means3D = cam.prev_state['means3D']
+        opacity = cam.prev_state['opacity']
+        shs = cam.prev_state['shs']
+        scales = cam.prev_state['scales']
+        rotations = cam.prev_state['rotations']
+    else:
+        opacity = pc._opacity
+        shs = pc.get_features
+        scales = pc._scaling
+        rotations = pc._rotation
+        means3D = pc.get_xyz
+        
+    means3D_final, scales_final, rotations_final, opacity_final, shs_final = pc._deformation.forward_dynamic(
+        means3D, scales, rotations, opacity, shs, time, force
+    )
+    state = {
+        'means3D': means3D_final.detach(),
+        'opacity': opacity_final.detach(),
+        'shs': shs_final.detach(),
+        'rotations': rotations_final.detach(),
+        'scales': scales_final.detach()
+    }
+    return state
 
 def render(
     viewpoint_camera: Camera,
@@ -49,7 +73,6 @@ def render(
     scaling_modifier = 1.0,
     override_color = None,
     stage="fine",
-    # prev_hidden=None,
 ):
     # Create zero tensor. We will use it to make pytorch return gradients of the 2D (screen-space) means
     screenspace_points = torch.zeros_like(pc.get_xyz, dtype=pc.get_xyz.dtype, requires_grad=True, device="cuda") + 0
@@ -59,14 +82,11 @@ def render(
         pass
 
     # Set up rasterization configuration
-    means3D = pc.get_xyz
-    tanfovx = math.tan(viewpoint_camera.FoVx * 0.5)
-    tanfovy = math.tan(viewpoint_camera.FoVy * 0.5)
     raster_settings = GaussianRasterizationSettings(
         image_height=int(viewpoint_camera.image_height),
         image_width=int(viewpoint_camera.image_width),
-        tanfovx=tanfovx,
-        tanfovy=tanfovy,
+        tanfovx=math.tan(viewpoint_camera.FoVx * 0.5),
+        tanfovy=math.tan(viewpoint_camera.FoVy * 0.5),
         bg=bg_color,
         scale_modifier=scaling_modifier,
         viewmatrix=viewpoint_camera.world_view_transform.cuda(),
@@ -76,50 +96,54 @@ def render(
         prefiltered=False,
         debug=pipe.debug
     )
-    n_points = means3D.shape[0]
-    _time = viewpoint_camera.time
-    _force = viewpoint_camera.force
+    n_points = pc.get_xyz.shape[0]
+    device = pc.get_xyz.device
+
     # if "anchor" in stage:
-    #     _time = cast_time_to_anchor(_time)
-    time = torch.tensor(_time).to(dtype=torch.float32, device=means3D.device).repeat(n_points, 1)
-    force = torch.tensor(_force).to(dtype=torch.float32, device=means3D.device).repeat(n_points, 1)
+    #     force *= 0.0
     rasterizer = GaussianRasterizer(raster_settings=raster_settings)
     means2D = screenspace_points
     opacity = pc._opacity
     shs = pc.get_features
-
-    # If precomputed 3d covariance is provided, use it. If not, then it will be computed from
-    # scaling / rotation by the rasterizer.
-    scales = None
-    rotations = None
-    cov3D_precomp = None
-    if pipe.compute_cov3D_python:
-        cov3D_precomp = pc.get_covariance(scaling_modifier)
-    else:
-        scales = pc._scaling
-        rotations = pc._rotation
-
+    scales = pc._scaling
+    rotations = pc._rotation
+    means3D = pc.get_xyz
     if "coarse" in stage:
+        means3D = pc.get_xyz
         means3D_final, scales_final, rotations_final, opacity_final, shs_final \
             = means3D, scales, rotations, opacity, shs
     else:
+        _time = viewpoint_camera.time
+        _force = viewpoint_camera.force
+        # if "anchor" in stage:
+        #     _time = cast_time_to_anchor(_time)
+        time = torch.tensor(_time).to(dtype=torch.float32, device=device).repeat(n_points, 1)
+        # time_prev = torch.ones_like(time) * (_time - 1/39)
+        # time_nxt = torch.ones_like(time) * (_time + 1/39)
+        
+        force = torch.tensor(_force).to(dtype=torch.float32, device=device).repeat(n_points, 1)
+        if viewpoint_camera.prev_state is not None:
+            means3D = viewpoint_camera.prev_state['means3D']
+            opacity = viewpoint_camera.prev_state['opacity']
+            shs = viewpoint_camera.prev_state['shs']
+            scales = viewpoint_camera.prev_state['scales']
+            rotations = viewpoint_camera.prev_state['rotations']
         means3D_final, scales_final, rotations_final, opacity_final, shs_final \
-            = pc._deformation.forward(means3D, scales, rotations, opacity, shs, time, force)
+            = pc._deformation.forward_dynamic(
+                means3D, scales, rotations, opacity, shs, time, force,
+            )
 
-    if ("coarse" in stage) or ("anchor" in stage):
-        momentum_reg = torch.tensor(0.0)
-        opacity_reg = torch.tensor(0.0)
-    else:
-        # use magic number 1/39 for time-step difference
-        time_prev = torch.ones_like(time) * (viewpoint_camera.time - 1/34)
-        time_nxt = torch.ones_like(time) * (viewpoint_camera.time + 1/34)
-        # use only means now
-        means3D_prev, scales_prev, rotations_prev, opacity_prev, shs_prev \
-            = pc._deformation.forward(means3D, scales, rotations, opacity, shs, time_prev, force)
-        means3D_nxt, scales_nxt, rotatiosn_nxt, opacity_nxt, shs_nxt \
-            = pc._deformation.forward(means3D, scales, rotations, opacity, shs, time_nxt, force)
-        momentum_reg = torch.abs(means3D_nxt + means3D_prev - 2 * means3D_final).mean()
-        opacity_reg = torch.abs(opacity_nxt + opacity_prev - 2 * opacity_final).mean()
+    # if ("coarse" in stage) or ("anchor" in stage):
+    momentum_reg = torch.tensor(0.0)
+    opacity_reg = torch.tensor(0.0)
+    # else:
+    #     # use only means now
+    #     means3D_prev, _, _, opacity_prev, _ \
+    #         = pc._deformation.forward_dynamic(means3D, scales, rotations, opacity, shs, time_prev, force)
+    #     means3D_nxt, _, _, opacity_nxt, _ \
+    #         = pc._deformation.forward_dynamic(means3D, scales, rotations, opacity, shs, time_nxt, force)
+    #     momentum_reg = torch.abs(means3D_nxt + means3D_prev - 2 * means3D_final).mean()
+    #     opacity_reg = torch.abs(opacity_nxt + opacity_prev - 2 * opacity_final).mean()
 
     scales_final = pc.scaling_activation(scales_final)
     rotations_final = pc.rotation_activation(rotations_final)
@@ -147,8 +171,15 @@ def render(
         opacities = opacity,
         scales = scales_final,
         rotations = rotations_final,
-        cov3D_precomp = cov3D_precomp
+        cov3D_precomp = None
     )
 
-    return rendered_image, screenspace_points, radii > 0, radii, depth, momentum_reg, opacity_reg # , hidden
+    state = {
+        'means3D': means3D_final,
+        'opacity': opacity_final,
+        'shs': shs_final,
+        'rotations': rotations_final,
+        'scales': scales_final
+    }
+    return rendered_image, screenspace_points, radii > 0, radii, depth, momentum_reg, opacity_reg, state
 

@@ -3,7 +3,7 @@ _base_ = './dnerf_default.py'
 USE_FORCE = True
 USE_TIME = True
 BLEND_TIME_FORCE = True
-RESOLUTION = [128, 128, 128]
+RESOLUTION = [64, 64, 64]
 INPUT_DIM = 3
 
 if USE_TIME:
@@ -15,8 +15,8 @@ if USE_FORCE and not BLEND_TIME_FORCE:
     INPUT_DIM += 1 # 4
 
 OptimizationParams = dict(
-    coarse_iterations = 15000, # 10000, # default: 3000
-    anchor_iterations = 0,
+    coarse_iterations = 5000, # 10000, # default: 3000
+    anchor_iterations = 50000,
     iterations = 5000000,
     batch_size = 8
 )
@@ -29,7 +29,7 @@ ModelHiddenParams = dict(
     kplanes_config = {
         'grid_dimensions': 2, # default: 2
         'input_coordinate_dim': INPUT_DIM,
-        'output_coordinate_dim': 128, # 64, 128
+        'output_coordinate_dim': 64, # 64, 128
         'resolution': RESOLUTION
     },
     # bounds=2.0,

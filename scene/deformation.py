@@ -19,7 +19,6 @@ class Deformation(nn.Module):
         self.grid = HexPlaneField(args.bounds, args.kplanes_config, args.multires)
         self.blend_time_force = args.blend_time_force
         self.args = args
-        # self.args.empty_voxel=True
         if self.args.empty_voxel:
             self.empty_voxel = DenseGrid(channels=1, world_size=[64, 64, 64])
         if self.args.static_mlp:
@@ -72,57 +71,42 @@ class Deformation(nn.Module):
         self.force_embedder = nn.Sequential(nn.Linear(4, 4), nn.ReLU(), nn.Linear(4, 1))
         if self.blend_time_force:
             self.force_time_embed = nn.Sequential(nn.ReLU(), nn.Linear(2, 1))
-        # self.force_deform = nn.Sequential(
-        #     nn.ReLU(), nn.Linear(self.W, self.W, dtype=torch.float32, bias=True),
-        #     nn.ReLU(), nn.Linear(self.W, 4, dtype=torch.float32, bias=True)
-        # )
+
         self.shs_deform = nn.Sequential(
             nn.ReLU(), nn.Linear(self.W, self.W, dtype=torch.float32, bias=True),
             nn.ReLU(), nn.Linear(self.W, 16 * 3, dtype=torch.float32, bias=True)
         )
 
-    def query_time_force(self, rays_pts_emb, scales_emb, rotations_emb, time_feature, time_emb, force_emb, prev_hidden):
+    def query_time_force(self, rays_pts_emb, time_emb, force_emb, prev_hidden):
         ''' embedding force from dim4 to dim1, to reduce numerical instability '''
-        if force_emb is not None: # NOTE: if use_force = True
-            force_emb = torch.exp(self.force_embedder(force_emb / 10))
+        if force_emb is not None:  # NOTE: if use_force = True
+            # force_emb = torch.exp(self.force_embedder(force_emb / 10))
+            force_emb = self.force_embedder(force_emb / 10)
         if self.blend_time_force:
             time_emb = self.force_time_embed(torch.cat((time_emb, force_emb), dim=1))
-            force_emb = None # NOTE: force information merged into time
-
-        grid_feature = self.grid(rays_pts_emb[:, :3], time_emb, force_emb, prev_hidden)
+            force_emb = None  # NOTE: force information merged into time
+        grid_feature = self.grid.forward(rays_pts_emb[:, :3], prev_hidden, time_emb, force_emb)
         if self.grid_pe > 1:
             grid_feature = poc_fre(grid_feature, self.grid_pe)
         hidden = torch.cat([grid_feature], -1).to(dtype=torch.float32)
         hidden2 = self.feature_out(hidden)
         return hidden2
 
-
     @property
     def get_empty_ratio(self):
         return self.ratio
-    
-    def forward(
-        self, rays_pts_emb, scales_emb=None, rotations_emb=None, opacity = None, shs_emb=None, 
-        time_feature=None, time_emb=None, force_emb=None, prev_hidden=None,
-    ):
-        if time_emb is None:
-            return self.forward_static(rays_pts_emb[:, :3])
-        else:
-            return self.forward_dynamic(rays_pts_emb, scales_emb, rotations_emb, opacity, shs_emb, time_feature, time_emb, force_emb, prev_hidden)
-    
 
     def forward_static(self, rays_pts_emb):
-        grid_feature = self.grid(rays_pts_emb[:,:3])
+        grid_feature = self.grid.forward(rays_pts_emb[:,:3])
         grid_feature.to(dtype=torch.float32)
         dx = self.static_mlp(grid_feature)
         return rays_pts_emb[:, :3] + dx
 
 
-    # TODO: EDIT THIS FUNCTION OR WRITE A NEW ONE FOR FORCE
     def forward_dynamic(self, rays_pts_emb, scales_emb, rotations_emb, opacity_emb, shs_emb, time_feature, time_emb, force_emb, prev_hidden):
         time_input = time_emb[:, :1] if self.args.use_time else None
         force_input = force_emb if self.args.use_force else None
-        hidden = self.query_time_force(rays_pts_emb, scales_emb, rotations_emb, time_feature, time_input, force_input, prev_hidden)
+        hidden = self.query_time_force(rays_pts_emb, time_input, force_input, prev_hidden)
 
         if self.args.static_mlp:
             mask = self.static_mlp(hidden)
@@ -130,6 +114,7 @@ class Deformation(nn.Module):
             mask = self.empty_voxel(rays_pts_emb[:, :3])
         else: # NO MASK
             mask = torch.ones_like(opacity_emb[:, 0], dtype=torch.float32).unsqueeze(-1)
+            # mask = torch.ones(size=opacity_emb[:, 0].shape, dtype=torch.float32, device = opacity_emb.device).unsqueeze(-1)
 
         if self.args.no_dx:
             pts = rays_pts_emb[:, :3]
@@ -213,10 +198,6 @@ class deform_network(nn.Module):
         self.register_buffer('rotation_scaling_poc', torch.FloatTensor([(2**i) for i in range(scale_rotation_pe)]))
         self.register_buffer('opacity_poc', torch.FloatTensor([(2**i) for i in range(opacity_pe)]))
         self.apply(initialize_weights)
-        # print(self)
-
-    def forward(self, point, scales=None, rotations=None, opacity=None, shs=None, times_sel=None, force=None, prev_hidden=None):
-        return self.forward_dynamic(point, scales, rotations, opacity, shs, times_sel, force, prev_hidden)
 
     @property
     def get_aabb(self):
@@ -225,19 +206,15 @@ class deform_network(nn.Module):
     @property
     def get_empty_ratio(self):
         return self.deformation_net.get_empty_ratio
-        
-    def forward_static(self, points):
-        points = self.deformation_net(points)
-        return points
     
-    def forward_dynamic(self, point, scales=None, rotations=None, opacity=None, shs=None, times_sel=None, force=None, prev_hidden=None):
-        point_emb = poc_fre(point, self.pos_poc)
+    def forward_dynamic(self, points, scales, rotations, opacity, shs, times_sel, force, prev_hidden=None):
+        point_emb = poc_fre(points, self.pos_poc)
         scales_emb = poc_fre(scales, self.rotation_scaling_poc)
         rotations_emb = poc_fre(rotations, self.rotation_scaling_poc)
-        means3D, scales, rotations, opacity, shs = self.deformation_net.forward(
+        means3D, scales, rotations, opacity, shs = self.deformation_net.forward_dynamic(
             point_emb, scales_emb, rotations_emb, opacity, shs, None, times_sel, force, prev_hidden
         )
-        return means3D, scales, rotations, opacity, shs #, hidden
+        return means3D, scales, rotations, opacity, shs # , hidden
     
     def get_mlp_parameters(self):
         return self.deformation_net.get_mlp_parameters() + list(self.timenet.parameters())
@@ -253,7 +230,9 @@ def initialize_weights(m):
 
 def poc_fre(input_data, poc_buf):
     input_data_emb = (input_data.unsqueeze(-1) * poc_buf).flatten(-2)
-    input_data_sin = input_data_emb.sin()
-    input_data_cos = input_data_emb.cos()
-    input_data_emb = torch.cat([input_data, input_data_sin,input_data_cos], -1)
+    input_data_emb = torch.cat([
+        input_data,
+        input_data_emb.sin(),
+        input_data_emb.cos()
+    ], -1)
     return input_data_emb
