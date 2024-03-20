@@ -2,8 +2,8 @@ _base_ = './dnerf_default.py'
 
 USE_FORCE = True
 USE_TIME = True
-BLEND_TIME_FORCE = False
-RESOLUTION = [64, 64, 64]
+BLEND_TIME_FORCE = True
+RESOLUTION = [128, 128, 128]
 INPUT_DIM = 3
 
 if USE_TIME:
@@ -18,7 +18,8 @@ OptimizationParams = dict(
     coarse_iterations = 100, # 10000, # default: 3000
     anchor_iterations = 5000,
     iterations = 5000000,
-    batch_size = 8
+    batch_size = 8,
+    scaling_lr = 0.001
 )
 
 ModelParams = dict(

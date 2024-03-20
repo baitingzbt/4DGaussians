@@ -16,6 +16,7 @@ from scene.gaussian_model import GaussianModel
 from scene.cameras import Camera
 from utils.sh_utils import eval_sh
 import numpy as np
+from copy import deepcopy
 
 # ANCHORS = np.array([
 #     0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1.0
@@ -40,7 +41,7 @@ def render_for_state(
     device = pc.get_xyz.device
     time = torch.tensor(cam.time).to(dtype=torch.float32, device=device).repeat(n_points, 1)
     force = torch.tensor(cam.force).to(dtype=torch.float32, device=device).repeat(n_points, 1)
-    if cam.prev_state is not None:
+    if cam.prev_state is not None and pc.recur:
         means3D = cam.prev_state['means3D']
         opacity = cam.prev_state['opacity']
         shs = cam.prev_state['shs']
@@ -56,6 +57,7 @@ def render_for_state(
     means3D_final, scales_final, rotations_final, opacity_final, shs_final = pc._deformation.forward_dynamic(
         means3D, scales, rotations, opacity, shs, time, force
     )
+
     state = {
         'means3D': means3D_final.detach(),
         'opacity': opacity_final.detach(),
@@ -63,6 +65,10 @@ def render_for_state(
         'rotations': rotations_final.detach(),
         'scales': scales_final.detach()
     }
+    # for k, v in state.items():
+    #     if torch.isnan(v).any():
+    #         print("render for state NaN at: ", k)
+    #         breakpoint()
     return state
 
 def render(
@@ -115,14 +121,14 @@ def render(
     else:
         _time = viewpoint_camera.time
         _force = viewpoint_camera.force
-        # if "anchor" in stage:
-        #     _time = cast_time_to_anchor(_time)
+        if "anchor" in stage:
+            _time = cast_time_to_anchor(_time)
         time = torch.tensor(_time).to(dtype=torch.float32, device=device).repeat(n_points, 1)
-        # time_prev = torch.ones_like(time) * (_time - 1/39)
-        # time_nxt = torch.ones_like(time) * (_time + 1/39)
+        time_prev = torch.ones_like(time) * (_time - 1/39)
+        time_nxt = torch.ones_like(time) * (_time + 1/39)
         
         force = torch.tensor(_force).to(dtype=torch.float32, device=device).repeat(n_points, 1)
-        if viewpoint_camera.prev_state is not None:
+        if viewpoint_camera.prev_state is not None and pc.recur:
             means3D = viewpoint_camera.prev_state['means3D']
             opacity = viewpoint_camera.prev_state['opacity']
             shs = viewpoint_camera.prev_state['shs']
@@ -130,20 +136,21 @@ def render(
             rotations = viewpoint_camera.prev_state['rotations']
         means3D_final, scales_final, rotations_final, opacity_final, shs_final \
             = pc._deformation.forward_dynamic(
-                means3D, scales, rotations, opacity, shs, time, force,
-            )
+                means3D, scales, rotations, opacity, shs, time, force)
 
-    # if ("coarse" in stage) or ("anchor" in stage):
-    momentum_reg = torch.tensor(0.0)
-    opacity_reg = torch.tensor(0.0)
-    # else:
-    #     # use only means now
-    #     means3D_prev, _, _, opacity_prev, _ \
-    #         = pc._deformation.forward_dynamic(means3D, scales, rotations, opacity, shs, time_prev, force)
-    #     means3D_nxt, _, _, opacity_nxt, _ \
-    #         = pc._deformation.forward_dynamic(means3D, scales, rotations, opacity, shs, time_nxt, force)
-    #     momentum_reg = torch.abs(means3D_nxt + means3D_prev - 2 * means3D_final).mean()
-    #     opacity_reg = torch.abs(opacity_nxt + opacity_prev - 2 * opacity_final).mean()
+    
+    # recursion uses no momentum loss
+    if ("coarse" in stage) or ("anchor" in stage) or pc.recur:
+        momentum_reg = torch.tensor(0.0)
+        opacity_reg = torch.tensor(0.0)
+    else:
+        # use only means now
+        means3D_prev, _, _, opacity_prev, _ \
+            = pc._deformation.forward_dynamic(means3D, scales, rotations, opacity, shs, time_prev, force)
+        means3D_nxt, _, _, opacity_nxt, _ \
+            = pc._deformation.forward_dynamic(means3D, scales, rotations, opacity, shs, time_nxt, force)
+        momentum_reg = torch.abs(means3D_nxt + means3D_prev - 2 * means3D_final).mean()
+        opacity_reg = torch.abs(opacity_nxt + opacity_prev - 2 * opacity_final).mean()
 
     scales_final = pc.scaling_activation(scales_final)
     rotations_final = pc.rotation_activation(rotations_final)
@@ -174,12 +181,12 @@ def render(
         cov3D_precomp = None
     )
 
-    state = {
-        'means3D': means3D_final,
-        'opacity': opacity_final,
-        'shs': shs_final,
-        'rotations': rotations_final,
-        'scales': scales_final
-    }
-    return rendered_image, screenspace_points, radii > 0, radii, depth, momentum_reg, opacity_reg, state
+    # state = {
+    #     'means3D': means3D_final.detach(),
+    #     'opacity': opacity_final.detach(),
+    #     'shs': shs_final.detach(),
+    #     'rotations': rotations_final.detach(),
+    #     'scales': scales_final.detach()
+    # }
+    return rendered_image, screenspace_points, radii > 0, radii, depth, momentum_reg, opacity_reg
 

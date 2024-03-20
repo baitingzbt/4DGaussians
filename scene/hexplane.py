@@ -121,8 +121,6 @@ def interpolate_ms_features(
             interp_out_plane = (grid_sample_wrapper(grid[ci], pts[..., coo_comb]).view(-1, feature_dim))
             # compute product over planes
             interp_space = interp_space * interp_out_plane
-            # print(f"\t\tinterp_space = {interp_space}")
-        # breakpoint()
         # combine over scales
         if concat_features:
             multi_scale_interp.append(interp_space)
@@ -198,20 +196,15 @@ class HexPlaneField(nn.Module):
     def set_aabb(self, xyz_max, xyz_min):
         aabb = torch.tensor([xyz_max, xyz_min], dtype=torch.float32)
         self.aabb = nn.Parameter(aabb,requires_grad=False)
-        # print("Voxel Plane: set aabb=", self.aabb)
 
     def get_density(
         self,
         pts: torch.Tensor,
-        # prev_pts: Optional[torch.Tensor] = None,
         time: Optional[torch.Tensor] = None,
         force: Optional[torch.Tensor] = None
     ):
         """Computes and returns the densities."""
         pts = normalize_aabb(pts, self.aabb)
-        # if prev_pts is not None:
-        #     prev_pts = normalize_aabb(prev_pts, self.aabb)
-        #     pts = self.pts_embedder(torch.cat((pts, prev_pts), dim=1))
         if time is not None:
             pts = torch.cat((pts, time), dim=-1)  # [n_rays, n_samples, 4 OR 10]
         if force is not None:
@@ -231,12 +224,7 @@ class HexPlaneField(nn.Module):
     def forward(
         self,
         pts: torch.Tensor,
-        prev_pts: Optional[torch.Tensor] = None,
         time: Optional[torch.Tensor] = None,
         force: Optional[torch.Tensor] = None,
     ):
-        features = self.get_density(pts, time, force)
-        # if prev_features is None:
-        #     prev_features = torch.zeros((features.shape[0], int(self.feat_dim / 2)), device=features.device, dtype=torch.float32)
-        # features = self.feature_aggr(torch.cat((features, prev_features), dim=1))
-        return features
+        return self.get_density(pts, time, force)

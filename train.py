@@ -38,8 +38,10 @@ EVAL_EVERY = 10000 # 10000
 SAVE_EVERY = 50000
 LOG_EVERY = 500 # 500
 MAX_PHASE = 5
+RECUR = True
 
 # this function gets means3D to cameras, which later can be used for dynamic training?
+@torch.no_grad()
 def get_state(cameras: List[Camera], gaussians: GaussianModel):
     for cam in cameras:
         # use coarse means3D (works when switching cameras)
@@ -130,7 +132,7 @@ def scene_reconstruction(
     batch_size = opt.batch_size
     shuffle_inter = int(len(train_cams) / batch_size) + 1
     timer.start()
-
+    train_views = update_traincams(_train_cams_selected)
     for iteration in range(first_iter, final_iter):        
 
         gaussians.update_learning_rate(iteration)
@@ -140,21 +142,17 @@ def scene_reconstruction(
             gaussians.oneupSHdegree()
 
         # reshuffle after going through entire data once
-        # if iteration == first_iter or iteration % shuffle_inter == 0:
-        #     random.shuffle(train_cams_rdm)
-            
-        # if (iteration == first_iter or iteration % shuffle_inter == 0) and (stage == "fine"):
-        # if (iteration % EVAL_EVERY == 0) and (iteration >= opt.densify_until_iter):
-        if (iteration % 1000 == 0 or iteration == first_iter) and (stage == 'fine'):
+        if (iteration % 1000 == 0 or iteration == first_iter) and RECUR:
             get_state(train_cams_rdm, gaussians)
-
+        elif (iteration == first_iter or iteration % shuffle_inter == 0) and not RECUR:
+            random.shuffle(train_cams_rdm)
         
         # go through dataset sequentially for next <batch_size>
-        query_idxs = [((iteration * batch_size) + _i) % len(train_cams_rdm) for _i in range(batch_size)]
+        query_idxs = [(iteration * batch_size + _i) % len(train_cams_rdm) for _i in range(batch_size)]
         
         points = gaussians.get_xyz.shape[0]
-        image_tensor = torch.zeros(size=(batch_size, 3, 600, 600), device='cuda')
-        gt_image_tensor = torch.zeros(size=(batch_size, 3, 600, 600), device='cuda')
+        image_tensor = torch.zeros(size=(batch_size, 3, 480, 480), device='cuda')
+        gt_image_tensor = torch.zeros(size=(batch_size, 3, 480, 480), device='cuda')
         visibility_tensor = torch.zeros(size=(batch_size, points), device='cuda')
         radii_tensor = torch.zeros(size=(batch_size, points), device='cuda')
         viewspace_point_tensor = []
@@ -162,7 +160,7 @@ def scene_reconstruction(
         total_opacity_reg = 0
         for _i, query_idx in enumerate(query_idxs):
             train_view = train_cams_rdm[query_idx]
-            image, viewspace_point, visibility_filter, radii, depth, momentum_reg, opacity_reg, _ \
+            image, viewspace_point, visibility_filter, radii, depth, momentum_reg, opacity_reg \
                 = render(train_view, gaussians, pipe, background, stage=stage)
             image_tensor[_i] = image
             gt_image_tensor[_i] = train_view.original_image.cuda()
@@ -202,9 +200,8 @@ def scene_reconstruction(
         # if opt.lambda_lpips !=0:
         #     lpipsloss = lpips_loss(image_tensor,gt_image_tensor,lpips_model)
         #     loss += opt.lambda_lpips * lpipsloss
-        # if iteration != first_iter:
         loss.backward()
-
+        print(f"loss final = {loss}")
         viewspace_point_tensor_grad = torch.zeros_like(viewspace_point)
         for idx in range(batch_size):
             viewspace_point_tensor_grad += viewspace_point_tensor[idx].grad
@@ -234,11 +231,11 @@ def scene_reconstruction(
             timer.pause()
             
             # if dataset.render_process:
-            if (iteration % EVAL_EVERY == EVAL_EVERY - 1) \
-                or (iteration == final_iter-1):
-                get_state(train_cams, gaussians)
-                get_state(test_cams, gaussians)
-                train_views = update_traincams(_train_cams_selected)
+            if (iteration % EVAL_EVERY == EVAL_EVERY - 1) or (iteration == final_iter-1):
+                if RECUR:
+                    get_state(train_cams, gaussians)
+                    get_state(test_cams, gaussians)
+                    train_views = update_traincams(_train_cams_selected)
                 avg_l1_test, avg_psnr_test = render_training_image(
                     scene, gaussians, test_cams, pipe, background, stage+"test",
                     iteration, timer.get_elapsed_time(), save_video, save_pointclound, save_images, use_wandb)
@@ -261,7 +258,7 @@ def scene_reconstruction(
 
             timer.start()
             # Densification
-            if iteration < opt.densify_until_iter and stage == "coarse":
+            if iteration < opt.densify_until_iter and (stage == "coarse" or not RECUR):
                 # Keep track of max radii in image-space for pruning
                 gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter].cuda(), radii[visibility_filter].cuda())
                 gaussians.add_densification_stats(viewspace_point_tensor_grad, visibility_filter)
@@ -273,15 +270,15 @@ def scene_reconstruction(
                     opacity_threshold = opt.opacity_threshold_fine_init - iteration * (opt.opacity_threshold_fine_init - opt.opacity_threshold_fine_after) / opt.densify_until_iter
                     densify_threshold = opt.densify_grad_threshold_fine_init - iteration * (opt.densify_grad_threshold_fine_init - opt.densify_grad_threshold_after) / opt.densify_until_iter
                 
-                if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0 and gaussians.get_xyz.shape[0] < 80000:
+                if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0 and gaussians.get_xyz.shape[0] < 30000:
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
                     gaussians.densify(densify_threshold, opacity_threshold, scene.cameras_extent, size_threshold, 5, 5, scene.model_path, iteration, stage)
 
-                if iteration > opt.pruning_from_iter and iteration % opt.pruning_interval == 0 and gaussians.get_xyz.shape[0] > 60000:
+                if iteration > opt.pruning_from_iter and iteration % opt.pruning_interval == 0 and gaussians.get_xyz.shape[0] > 20000:
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
                     gaussians.prune(densify_threshold, opacity_threshold, scene.cameras_extent, size_threshold)
                     
-                if iteration % opt.densification_interval == 0 and gaussians.get_xyz.shape[0] < 80000 and opt.add_point:
+                if iteration % opt.densification_interval == 0 and gaussians.get_xyz.shape[0] < 30000 and opt.add_point:
                     gaussians.grow(5, 5, scene.model_path, iteration,stage)
 
                 if iteration % opt.opacity_reset_interval == 0:
@@ -296,6 +293,7 @@ def scene_reconstruction(
 def training(dataset, hyper, opt, pipe, checkpoint, expname, use_wandb, anchors):
     prepare_output_and_logger(args, expname)
     gaussians = GaussianModel(dataset.sh_degree, hyper)
+    gaussians.recur = RECUR
     dataset.model_path = args.model_path
     timer = Timer()
     scene = Scene(dataset, gaussians)
@@ -345,10 +343,9 @@ if __name__ == "__main__":
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
     parser.add_argument('--wandb', action='store_true', default=False)
     parser.add_argument("--quiet", action="store_true", default=False)
-    # parser.add_argument("--phases", action="store_true", default=False)
     parser.add_argument("--anchors", action="store_true", default=False)
     parser.add_argument("--start_checkpoint", type=str, default = None)
-    parser.add_argument("--expname", type=str, default = "")
+    parser.add_argument("--expnamee", type=str, default = "")
     parser.add_argument("--configs", type=str, default = "")
     parser.add_argument("--data_drive", type=str, default='.')
     parser.add_argument("--data_path_train", type=str, nargs='+', default = [])
@@ -376,7 +373,7 @@ if __name__ == "__main__":
         args = merge_hparams(args, config)
 
     if args.wandb:
-        wandb.init(project='4dgs_force', name=args.expname)
+        wandb.init(project='4dgs_force', name=args.expname, dir='/sdd/baiting/4DGaussians/')
 
     # Initialize system state (RNG)
     safe_state(args.quiet)

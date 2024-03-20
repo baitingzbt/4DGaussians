@@ -7,11 +7,11 @@ RESOLUTION = [128, 128, 128]
 INPUT_DIM = 3
 
 if USE_TIME:
-    RESOLUTION += [128] # 64, 128
+    RESOLUTION += [256] # 64, 128
     INPUT_DIM += 1
 
 if USE_FORCE and not BLEND_TIME_FORCE:
-    RESOLUTION += [128] # [32, 32, 32, 64]
+    RESOLUTION += [256] # [32, 32, 32, 64]
     INPUT_DIM += 1 # 4
 
 OptimizationParams = dict(

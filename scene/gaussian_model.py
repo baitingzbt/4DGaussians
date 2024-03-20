@@ -72,6 +72,7 @@ class GaussianModel:
             self.force_grids = []
             self.plane_grids = [0, 1, 3]
         self.args = args
+        self.recur = False
     
     def capture(self):
         return (
@@ -329,8 +330,6 @@ class GaussianModel:
         self.active_sh_degree = self.max_sh_degree
 
     def replace_tensor_to_optimizer(self, tensor, name):
-        if name == 'opacity':
-            breakpoint()
         optimizable_tensors = {}
         for group in self.optimizer.param_groups:
             if group["name"] == name:
@@ -682,11 +681,10 @@ class GaussianModel:
         # time_reg = time_reg.clamp(1e-5) # don't go below 1e-5
         # plane_reg = plane_reg.clamp(2e-6)
         reg_loss_dict = defaultdict(lambda: torch.tensor(0))
-        reg_loss_dict['time_reg'] = time_reg
-        reg_loss_dict['plane_reg'] = plane_reg
-        reg_loss_dict['l1_time_reg'] = l1_time_reg
-        reg_loss_dict['l2_time_reg'] = l2_time_reg
-        reg_loss_dict['force_reg'] = force_reg
+        reg_loss_dict['time_reg'] = time_reg.detach()
+        reg_loss_dict['plane_reg'] = plane_reg.detach()
+        reg_loss_dict['l1_time_reg'] = l1_time_reg.detach()
+        reg_loss_dict['l2_time_reg'] = l2_time_reg.detach()
+        reg_loss_dict['force_reg'] = force_reg.detach()
         reg_loss_dict['total_reg'] = time_reg + plane_reg + l1_time_reg + l2_time_reg + force_reg
         return reg_loss_dict
-# CUDA_VISIBLE_DEVICES=2 nohup python train.py --data_path data_new/scene2_force1 data_new/scene2_force2 --n_train_cams 25 50 --n_test_cams 2 2 --expname scene2_morecam2 --configs arguments/dnerf/force.py --wandb > scene2_morecam2.out

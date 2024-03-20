@@ -293,7 +293,7 @@ def readCamerasFromTransforms(
         norm_data = im_data / 255.0
         arr = norm_data[:, :, :3] * norm_data[:, :, 3:4] + bg * (1 - norm_data[:, :, 3:4])
         image = Image.fromarray(np.array(arr * 255.0, dtype=np.byte), "RGB")
-        image = PILtoTorch(image, (800, 800))
+        image = PILtoTorch(image, (480, 480))
         fovy = focal2fov(fov2focal(fovx, image.shape[1]), image.shape[2])
         force = np.array(frame['force']); assert force.shape == (7, )
         cam_infos.append(
@@ -320,10 +320,11 @@ def readCamerasFromShortTransforms(
     # H, W = contents['height'], contents['width']    # original H, W
     # NEW_H, NEW_W = 600, 600    # target H, W
     force = np.array(contents['force'])[3:]  #  directly drop positions here
+    force /= np.array([1, 1, 1, 1000])
     for idx, frame in enumerate(contents["frames"]):
         if idx >= MAX_FRAME:
             break
-        image = Image.open(os.path.join(path, frame["file_path"])).resize((600, 600))
+        image = Image.open(os.path.join(path, frame["file_path"])).resize((480, 480))
         norm_data =  np.array(image.convert("RGBA")) / 255.0
         # assume white_background = True
         arr = norm_data[:, :, :3] * norm_data[:, :, 3:4] + (1 - norm_data[:, :, 3:4])
@@ -342,7 +343,7 @@ def readCamerasFromShortTransforms(
         )
     return cams
 
-
+# p torch.isnan(self.force_embedder[6].bias).any()
 
 def read_force_timeline(paths_train: List[str], paths_test: List[str]):
     # read from each force's subfolder
