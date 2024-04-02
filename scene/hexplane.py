@@ -85,10 +85,10 @@ def init_grid_param(
         )
         # x, y, z, time, force;
         # below means if time or force exist in current coo_comb, initialize those planes to 1
-        if max(coo_comb) >= 3:
-            nn.init.ones_(new_grid_coef)
-        else:
-            nn.init.uniform_(new_grid_coef, a=a, b=b)
+        # if max(coo_comb) >= 3:
+        #     nn.init.ones_(new_grid_coef)
+        # else:
+        nn.init.uniform_(new_grid_coef, a=a, b=b)
         grid_coefs.append(new_grid_coef)
 
     return grid_coefs
@@ -98,8 +98,7 @@ def interpolate_ms_features(
     pts: torch.Tensor,
     ms_grids: Collection[Iterable[nn.Module]],
     grid_dimensions: int,
-    concat_features: bool,
-    num_levels: Optional[int],
+    concat_features: bool
 ) -> torch.Tensor:
     coo_combs = list(
         itertools.combinations(range(pts.shape[-1]), grid_dimensions)
@@ -107,19 +106,18 @@ def interpolate_ms_features(
     # drop plane for (f, t) (3, 4) if it exists
     if len(coo_combs) == 10:
         coo_combs = coo_combs[:-1]
-    # print("\n\ninterpolate_ms_features\n\n")
-    # breakpoint()
-    if num_levels is None:
-        num_levels = len(ms_grids)
     multi_scale_interp = [] if concat_features else 0.
     grid: nn.ParameterList
-    for scale_id, grid in enumerate(ms_grids[:num_levels]):
+    # breakpoint()
+    for scale_id, grid in enumerate(ms_grids):
         interp_space = 1.
         for ci, coo_comb in enumerate(coo_combs):
             # interpolate in plane
             feature_dim = grid[ci].shape[1]  # shape of grid[ci]: 1, out_dim, *reso
             interp_out_plane = (grid_sample_wrapper(grid[ci], pts[..., coo_comb]).view(-1, feature_dim))
             # compute product over planes
+            # NOTE: if the grid[ci] of <coo_combs> actually matters, interp_out_plane should change more?
+            # this means
             interp_space = interp_space * interp_out_plane
         # combine over scales
         if concat_features:
@@ -138,7 +136,8 @@ class HexPlaneField(nn.Module):
         self,
         bounds,
         planeconfig,
-        multires
+        multires,
+        hidden_width
     ) -> None:
         super().__init__()
         # breakpoint()
@@ -173,12 +172,13 @@ class HexPlaneField(nn.Module):
                 self.feat_dim = gp[-1].shape[1]
             self.grids.append(gp)
 
-        # self.recur_feat_dim = int(self.feat_dim + self.feat_dim / 2)
-        # self.feature_aggr = nn.Sequential(
-        #     nn.Linear(self.recur_feat_dim, self.recur_feat_dim),
-        #     nn.ReLU(),
-        #     nn.Linear(self.recur_feat_dim, self.feat_dim)
-        # )
+        self.hidden_width = hidden_width
+        self.recur_feat_dim = int(self.feat_dim + self.hidden_width)
+        self.feature_aggr = nn.Sequential(
+            nn.Linear(self.recur_feat_dim, self.recur_feat_dim),
+            nn.ReLU(),
+            nn.Linear(self.recur_feat_dim, self.feat_dim)
+        )
             
         # [x_prev, y_prev, z_prev, x, y, z] -> [hidden1, hidden2, hidden3]
         # self.pts_embedder = nn.Sequential(
@@ -201,7 +201,8 @@ class HexPlaneField(nn.Module):
         self,
         pts: torch.Tensor,
         time: Optional[torch.Tensor] = None,
-        force: Optional[torch.Tensor] = None
+        force: Optional[torch.Tensor] = None,
+        hidden: Optional[torch.Tensor] = None
     ):
         """Computes and returns the densities."""
         pts = normalize_aabb(pts, self.aabb)
@@ -214,9 +215,11 @@ class HexPlaneField(nn.Module):
             pts,
             ms_grids=self.grids,  # noqa
             grid_dimensions=self.grid_config[0]["grid_dimensions"],
-            concat_features=self.concat_features,
-            num_levels=None
+            concat_features=self.concat_features
         )
+        
+        if hidden is not None:
+            features = self.feature_aggr.forward(torch.cat((features, hidden), dim=1))
         if len(features) < 1:
             features = torch.zeros((0, 1)).to(features.device)
         return features
@@ -226,5 +229,6 @@ class HexPlaneField(nn.Module):
         pts: torch.Tensor,
         time: Optional[torch.Tensor] = None,
         force: Optional[torch.Tensor] = None,
+        hidden: Optional[torch.Tensor] = None,
     ):
-        return self.get_density(pts, time, force)
+        return self.get_density(pts, time, force, hidden)

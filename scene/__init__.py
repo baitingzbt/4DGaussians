@@ -13,7 +13,7 @@ import os
 from utils.system_utils import searchForMaxIteration
 from scene.gaussian_model import GaussianModel
 from arguments import ModelParams
-from scene.dataset_readers import add_points, readForceSyntheticInfo
+from scene.dataset_readers import add_points, readForceSyntheticInfo, readForceSyntheticInfo2
 
 class Scene:
 
@@ -33,11 +33,14 @@ class Scene:
             print("Loading trained model at iteration {}".format(self.loaded_iter))
 
 
-        print("Found force transforms.json file, assuming Blender data set for MANY force")
-        scene_info = readForceSyntheticInfo(
+        # scene_info = readForceSyntheticInfo(
+        #     args.data_path_train, args.data_path_test,
+        #     args.n_train_cams, args.n_test_cams,
+        #     args.white_background
+        # )
+        scene_info = readForceSyntheticInfo2(
             args.data_path_train, args.data_path_test,
-            args.n_train_cams, args.n_test_cams,
-            args.white_background
+            args.n_train_cams, args.n_test_cams
         )
         self.maxtime = scene_info.maxtime
         self.dataset_type = "blender"

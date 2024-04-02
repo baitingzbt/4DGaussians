@@ -17,6 +17,7 @@ from scene.cameras import Camera
 from utils.sh_utils import eval_sh
 import numpy as np
 from copy import deepcopy
+from utils.general_utils import knn
 
 # ANCHORS = np.array([
 #     0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1.0
@@ -41,7 +42,7 @@ def render_for_state(
     device = pc.get_xyz.device
     time = torch.tensor(cam.time).to(dtype=torch.float32, device=device).repeat(n_points, 1)
     force = torch.tensor(cam.force).to(dtype=torch.float32, device=device).repeat(n_points, 1)
-    if cam.prev_state is not None and pc.recur:
+    if cam.prev_state is not None and pc._deformation.recur_state:
         means3D = cam.prev_state['means3D']
         opacity = cam.prev_state['opacity']
         shs = cam.prev_state['shs']
@@ -54,8 +55,8 @@ def render_for_state(
         rotations = pc._rotation
         means3D = pc.get_xyz
         
-    means3D_final, scales_final, rotations_final, opacity_final, shs_final = pc._deformation.forward_dynamic(
-        means3D, scales, rotations, opacity, shs, time, force
+    means3D_final, scales_final, rotations_final, opacity_final, shs_final, _ = pc._deformation.forward_dynamic(
+        means3D, scales, rotations, opacity, shs, time, force, cam.prev_hidden
     )
 
     state = {
@@ -65,11 +66,23 @@ def render_for_state(
         'rotations': rotations_final.detach(),
         'scales': scales_final.detach()
     }
-    # for k, v in state.items():
-    #     if torch.isnan(v).any():
-    #         print("render for state NaN at: ", k)
-    #         breakpoint()
     return state
+
+def render_for_hidden(
+    cam: Camera,
+    pc: GaussianModel,
+):
+    # Set up rasterization configuration
+    time = torch.tensor(cam.time).to(dtype=torch.float32, device=pc.get_xyz.device).repeat(pc.get_xyz.shape[0], 1)
+    force = torch.tensor(cam.force).to(dtype=torch.float32, device=pc.get_xyz.device).repeat(pc.get_xyz.shape[0], 1)
+    opacity = pc._opacity
+    shs = pc.get_features
+    scales = pc._scaling
+    rotations = pc._rotation
+    means3D = pc.get_xyz
+    hidden = cam.prev_hidden
+    # return the new hidden
+    return pc._deformation.forward_dynamic(means3D, scales, rotations, opacity, shs, time, force, hidden)[-1].detach()
 
 def render(
     viewpoint_camera: Camera,
@@ -114,6 +127,7 @@ def render(
     scales = pc._scaling
     rotations = pc._rotation
     means3D = pc.get_xyz
+    hidden = None
     if "coarse" in stage:
         means3D = pc.get_xyz
         means3D_final, scales_final, rotations_final, opacity_final, shs_final \
@@ -126,31 +140,42 @@ def render(
         time = torch.tensor(_time).to(dtype=torch.float32, device=device).repeat(n_points, 1)
         time_prev = torch.ones_like(time) * (_time - 1/39)
         time_nxt = torch.ones_like(time) * (_time + 1/39)
-        
         force = torch.tensor(_force).to(dtype=torch.float32, device=device).repeat(n_points, 1)
-        if viewpoint_camera.prev_state is not None and pc.recur:
+        if viewpoint_camera.prev_state is not None and pc._deformation.recur_state:
             means3D = viewpoint_camera.prev_state['means3D']
             opacity = viewpoint_camera.prev_state['opacity']
             shs = viewpoint_camera.prev_state['shs']
             scales = viewpoint_camera.prev_state['scales']
             rotations = viewpoint_camera.prev_state['rotations']
-        means3D_final, scales_final, rotations_final, opacity_final, shs_final \
-            = pc._deformation.forward_dynamic(
-                means3D, scales, rotations, opacity, shs, time, force)
+        elif viewpoint_camera.prev_hidden is not None and pc._deformation.recur_hidden:
+            hidden = viewpoint_camera.prev_hidden.detach()
+        means3D_final, scales_final, rotations_final, opacity_final, shs_final, _ \
+            = pc._deformation.forward_dynamic(means3D, scales, rotations, opacity, shs, time, force, hidden)
 
     
-    # recursion uses no momentum loss
-    if ("coarse" in stage) or ("anchor" in stage) or pc.recur:
+    # recursion doesn't use momentum loss
+    if ("coarse" in stage) or ("anchor" in stage) or pc._deformation.recur:
         momentum_reg = torch.tensor(0.0)
-        opacity_reg = torch.tensor(0.0)
+        knn_reg = torch.tensor(0.0)
     else:
         # use only means now
-        means3D_prev, _, _, opacity_prev, _ \
-            = pc._deformation.forward_dynamic(means3D, scales, rotations, opacity, shs, time_prev, force)
-        means3D_nxt, _, _, opacity_nxt, _ \
-            = pc._deformation.forward_dynamic(means3D, scales, rotations, opacity, shs, time_nxt, force)
+        means3D_prev = pc._deformation.forward_dynamic(means3D, scales, rotations, opacity, shs, time_prev, force, None)[0]
+        means3D_nxt = pc._deformation.forward_dynamic(means3D, scales, rotations, opacity, shs, time_nxt, force, None)[0]
         momentum_reg = torch.abs(means3D_nxt + means3D_prev - 2 * means3D_final).mean()
-        opacity_reg = torch.abs(opacity_nxt + opacity_prev - 2 * opacity_final).mean()
+        velocity = (means3D_nxt - means3D_prev) / 2 # approxiamtion?
+
+        ############# KNN rigid - nearby points have similar velo ###############
+        k = 20
+        xyz_cur =  pc.get_xyz #  + delta_mean
+        idx, dist = knn(
+            xyz_cur[None].contiguous().detach(), 
+            xyz_cur[None].contiguous().detach(), 
+            k
+        )
+        weight = torch.exp(-100 * dist)
+        vel_dist = torch.norm(velocity[idx] - velocity[None, :, None], p=2, dim=-1)
+        knn_reg = (weight * vel_dist).sum() / k / xyz_cur.shape[0]
+        ############# KNN rigid - nearby points have similar velo ###############
 
     scales_final = pc.scaling_activation(scales_final)
     rotations_final = pc.rotation_activation(rotations_final)
@@ -181,12 +206,6 @@ def render(
         cov3D_precomp = None
     )
 
-    # state = {
-    #     'means3D': means3D_final.detach(),
-    #     'opacity': opacity_final.detach(),
-    #     'shs': shs_final.detach(),
-    #     'rotations': rotations_final.detach(),
-    #     'scales': scales_final.detach()
-    # }
-    return rendered_image, screenspace_points, radii > 0, radii, depth, momentum_reg, opacity_reg
+    
+    return rendered_image, screenspace_points, radii > 0, radii, depth, momentum_reg, knn_reg
 

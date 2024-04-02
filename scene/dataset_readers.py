@@ -13,10 +13,8 @@ import os
 import sys
 from PIL import Image
 from scene.cameras import Camera
-from typing import List, Set, Any, Optional, Dict
-
-from typing import NamedTuple
-import copy
+from typing import List, Set, Any, Optional, Dict, NamedTuple
+from multiprocessing.pool import ThreadPool
 from utils.graphics_utils import getWorld2View2, focal2fov, fov2focal
 import numpy as np
 import torch
@@ -343,7 +341,49 @@ def readCamerasFromShortTransforms(
         )
     return cams
 
-# p torch.isnan(self.force_embedder[6].bias).any()
+
+# use with cautious, lots of special case and magic numbers to maximize reading speed
+def readCamShortParallel(
+    path: str,
+    mapper: Dict,
+    force_idx: int,
+    pos_idx: int
+) -> List[Camera]:
+    cams = []
+    with open(f"{path}/transforms_short.json") as json_file:
+        contents: Dict = json.load(json_file)
+    matrix = -np.linalg.inv(np.array(contents["transform_matrix"]))
+    R = np.transpose(matrix[:3, :3])
+    R[:, 0] = -R[:, 0]
+    force = np.array(contents['force'])[3:]  #  directly drop positions here
+    force /= np.array([1, 1, 1, 1000])
+    
+    frames = contents["frames"]
+    def read_fn(idx_frame) -> Camera:
+        frame_step, frame = idx_frame
+        if frame_step >= MAX_FRAME:
+            return None
+        image = Image.open(f"{path}/{frame['file_path']}").resize((480, 480))
+        norm_data = np.array(image.convert("RGBA")) / 255.0
+        # assume white_background = True
+        arr = norm_data[:, :, :3] * norm_data[:, :, 3:4] + (1 - norm_data[:, :, 3:4])
+        cam = Camera(
+            R=R,
+            T=matrix[:3, 3],
+            FoVx=contents['camera_angle_x'], # assume H and W are the same to save compute
+            FoVy=contents['camera_angle_x'], # assume H and W are the same to save compute
+            image=torch.tensor(arr, dtype=torch.float32).permute(2, 0, 1),
+            time=mapper[frame["time"]],
+            frame_step=frame_step,
+            force=force,
+            force_idx=force_idx,
+            pos_idx=pos_idx
+        )
+        return cam
+
+    with ThreadPool(10) as pool2:
+        cams = pool2.map(read_fn, zip(list(range(len(frames))), frames))
+    return [cam for cam in cams if cam is not None]
 
 def read_force_timeline(paths_train: List[str], paths_test: List[str]):
     # read from each force's subfolder
@@ -399,6 +439,79 @@ def readForceSyntheticInfo(
         nerf_normalization=nerf_normalization,
         ply_path=ply_path,
         maxtime=max_time
+    )
+    return scene_info
+
+def readForceSyntheticInfo2(
+    paths_train: List[str],
+    paths_test: List[str],
+    n_train_cams: List[int],
+    n_test_cams: List[int]
+):
+    paths = paths_train + paths_test
+    timestamp_mapper, maxtime = read_force_timeline(paths_train, paths_test)
+
+    def helper_train(args) -> List[Camera]:
+        path, i, force_idx = args
+        return readCamShortParallel(f"{path}/train/cam_{i}", timestamp_mapper, force_idx, i)
+    
+    def helper_test(args) -> List[Camera]:
+        path, i, force_idx = args
+        return readCamShortParallel(f"{path}/test/cam_{i}", timestamp_mapper, force_idx, i)
+
+    import time
+    time_start = time.time()
+    # extend the paths for parallelization
+    # i.e. [path1, path2], [10, 15] 
+    #    -> [[path1] * 10, [path2]*15]
+    #    -> [...path1..., ...path2...]
+    paths_train_extended = []
+    paths_test_extended = []
+    force_idx_train_extended = []
+    force_idx_test_extended = []
+    cam_idx_train_extended = []
+    cam_idx_test_extended = []
+    for i, n in enumerate(n_train_cams):
+        paths_train_extended.extend([paths_train[i]] * n)
+        force_idx_train_extended.extend([i] * n)
+        cam_idx_train_extended.extend([j for j in range(n)])
+    for i, n in enumerate(n_test_cams):
+        paths_test_extended.extend([paths_test[i]] * n)
+        force_idx_test_extended.extend([i] * n)
+        cam_idx_test_extended.extend([j for j in range(n)])
+
+    with ThreadPool(20) as pool:
+        train_cams: List[List[Camera]] = pool.map(
+            helper_train,
+            zip(paths_train_extended, cam_idx_train_extended, force_idx_train_extended)
+        )
+    # get flatten from nested parallel
+    train_cams: List[Camera] = [c for cams in train_cams for c in cams if c is not None]
+    # train_cams = list(sorted(train_cams, key = lambda c: (c.force_idx, c.pos_idx, c.time)))
+    
+    with ThreadPool(20) as pool:
+        test_cams: List[List[Camera]] = pool.map(
+            helper_test,
+            zip(paths_test_extended, cam_idx_test_extended, force_idx_test_extended)
+        )
+    test_cams: List[Camera] = [c for cams in test_cams for c in cams if c is not None]
+    # test_cams = list(sorted(test_cams, key = lambda c: (c.force_idx, c.pos_idx, c.time)))
+    time_end = time.time()
+
+    # for c in test_cams: print(c.force_idx, c.pos_idx, c.time)
+    print(f"parallelized total time: {time_end - time_start}")
+
+    num_pts = 2000
+    # We create random points inside the bounds of the synthetic Blender scenes
+    xyz = np.random.random((num_pts, 3)) * 2.6 - 1.3
+    shs = np.random.random((num_pts, 3)) / 255.0
+    scene_info = SceneInfo(
+        point_cloud=BasicPointCloud(points=xyz, colors=SH2RGB(shs), normals=np.zeros((num_pts, 3))),
+        train_cameras=train_cams,
+        test_cameras=test_cams,
+        nerf_normalization=getNerfppNorm(train_cams),
+        ply_path=os.path.join(paths[0], "fused.ply"), # NOTE: PLACEHOLDER?
+        maxtime=maxtime
     )
     return scene_info
 

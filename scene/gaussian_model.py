@@ -43,7 +43,7 @@ class GaussianModel:
         self.rotation_activation = torch.nn.functional.normalize
 
 
-    def __init__(self, sh_degree : int, args):
+    def __init__(self, sh_degree: int, args):
         self.active_sh_degree = 0
         self.max_sh_degree = sh_degree  
         self._xyz = torch.empty(0)
@@ -72,7 +72,6 @@ class GaussianModel:
             self.force_grids = []
             self.plane_grids = [0, 1, 3]
         self.args = args
-        self.recur = False
     
     def capture(self):
         return (
@@ -678,7 +677,7 @@ class GaussianModel:
         l2_time_reg = torch.tensor(0) if l2_time_planes_weight <= 1e-7 else l2_time_planes_weight * self._l2_regulation()
         force_reg = torch.tensor(0) if (not self.args.use_force) or self.args.blend_time_force or force_weight <= 1e-7 \
             else force_weight * self._force_regulation()
-        # time_reg = time_reg.clamp(1e-5) # don't go below 1e-5
+        # time_reg = time_reg.clamp(2e-5) # don't go below 1e-5
         # plane_reg = plane_reg.clamp(2e-6)
         reg_loss_dict = defaultdict(lambda: torch.tensor(0))
         reg_loss_dict['time_reg'] = time_reg.detach()

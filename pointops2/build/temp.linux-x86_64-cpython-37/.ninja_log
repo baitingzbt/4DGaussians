@@ -1,0 +1,22 @@
+# ninja log v5
+6	7971	1711840957643962984	/home/baiting/4d-gaussian-splatting/pointops2/build/temp.linux-x86_64-cpython-37/src/subtraction/subtraction_cuda.o	da2d7715ba4677aa
+4	8115	1711840957787962350	/home/baiting/4d-gaussian-splatting/pointops2/build/temp.linux-x86_64-cpython-37/src/rpe/relative_pos_encoding_cuda.o	cf6b59d033a60bcb
+2	8178	1711840957851962069	/home/baiting/4d-gaussian-splatting/pointops2/build/temp.linux-x86_64-cpython-37/src/grouping/grouping_cuda.o	b128fef5192cb550
+2	8218	1711840957891961893	/home/baiting/4d-gaussian-splatting/pointops2/build/temp.linux-x86_64-cpython-37/src/attention_v2/attention_cuda_v2.o	eec35ebe246be949
+3	8239	1711840957915961788	/home/baiting/4d-gaussian-splatting/pointops2/build/temp.linux-x86_64-cpython-37/src/interpolation/interpolation_cuda.o	9a04025603e3f98b
+5	8263	1711840957939961682	/home/baiting/4d-gaussian-splatting/pointops2/build/temp.linux-x86_64-cpython-37/src/rpe_v2/relative_pos_encoding_cuda_v2.o	ea1c657fed29ae75
+1	8345	1711840958019961330	/home/baiting/4d-gaussian-splatting/pointops2/build/temp.linux-x86_64-cpython-37/src/attention/attention_cuda.o	dfcba12fe64aa6c4
+4	8539	1711840958211960486	/home/baiting/4d-gaussian-splatting/pointops2/build/temp.linux-x86_64-cpython-37/src/knnquery/knnquery_cuda.o	7cbfd796def2ae81
+6	9181	1711840958855957653	/home/baiting/4d-gaussian-splatting/pointops2/build/temp.linux-x86_64-cpython-37/src/sampling/sampling_cuda.o	4a5600dbf65d2aa5
+0	9314	1711840958987957073	/home/baiting/4d-gaussian-splatting/pointops2/build/temp.linux-x86_64-cpython-37/src/aggregation/aggregation_cuda.o	3e3e6c927e9bf174
+4	26846	1711840976503879957	/home/baiting/4d-gaussian-splatting/pointops2/build/temp.linux-x86_64-cpython-37/src/pointops_api.o	f9ea5043ebc20ca0
+1	30012	1711840979683865959	/home/baiting/4d-gaussian-splatting/pointops2/build/temp.linux-x86_64-cpython-37/src/attention/attention_cuda_kernel.o	b27454fdec354d18
+1	30671	1711840980343863059	/home/baiting/4d-gaussian-splatting/pointops2/build/temp.linux-x86_64-cpython-37/src/attention_v2/attention_cuda_kernel_v2.o	1f25e1ae1fee2a4a
+6	30956	1711840980627861811	/home/baiting/4d-gaussian-splatting/pointops2/build/temp.linux-x86_64-cpython-37/src/subtraction/subtraction_cuda_kernel.o	6f66247f60e0a0d8
+0	31463	1711840981135859579	/home/baiting/4d-gaussian-splatting/pointops2/build/temp.linux-x86_64-cpython-37/src/aggregation/aggregation_cuda_kernel.o	85fa99b853ccd8d
+5	31581	1711840981255859053	/home/baiting/4d-gaussian-splatting/pointops2/build/temp.linux-x86_64-cpython-37/src/rpe/relative_pos_encoding_cuda_kernel.o	6fb590329560168
+4	32124	1711840981795856680	/home/baiting/4d-gaussian-splatting/pointops2/build/temp.linux-x86_64-cpython-37/src/knnquery/knnquery_cuda_kernel.o	5385d3460a8caafb
+3	32133	1711840981807856627	/home/baiting/4d-gaussian-splatting/pointops2/build/temp.linux-x86_64-cpython-37/src/interpolation/interpolation_cuda_kernel.o	ba01a570bab43fe3
+6	32626	1711840982299854466	/home/baiting/4d-gaussian-splatting/pointops2/build/temp.linux-x86_64-cpython-37/src/sampling/sampling_cuda_kernel.o	64e10efe79d9aca6
+2	34568	1711840984239845941	/home/baiting/4d-gaussian-splatting/pointops2/build/temp.linux-x86_64-cpython-37/src/grouping/grouping_cuda_kernel.o	7cc7a44d198c8826
+5	34571	1711840984243845924	/home/baiting/4d-gaussian-splatting/pointops2/build/temp.linux-x86_64-cpython-37/src/rpe_v2/relative_pos_encoding_cuda_kernel_v2.o	b805cd37ec876cf3

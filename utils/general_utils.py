@@ -14,6 +14,7 @@ import sys
 from datetime import datetime
 import numpy as np
 import random
+from pointops2.functions.pointops import furthestsampling, knnquery
 
 def inverse_sigmoid(x):
     return torch.log(x/(1-x))
@@ -138,3 +139,20 @@ def safe_state(silent):
     np.random.seed(0)
     torch.manual_seed(0)
     torch.cuda.set_device(torch.device("cuda:0"))
+
+
+def knn(x, src, k, transpose=False):
+    if transpose:
+        x = x.transpose(1, 2).contiguous()
+        src = src.transpose(1, 2).contiguous()
+    b, n, _ = x.shape
+    m = src.shape[1]
+    x = x.view(-1, 3)
+    src = src.view(-1, 3)
+    x_offset = torch.full((b,), n, dtype=torch.long, device=x.device)
+    src_offset = torch.full((b,), m, dtype=torch.long, device=x.device)
+    x_offset = torch.cumsum(x_offset, dim=0).int()
+    src_offset = torch.cumsum(src_offset, dim=0).int()
+    idx, dists = knnquery(k, src, x, src_offset, x_offset)
+    idx = idx.view(b, n, k) - (src_offset - m)[:, None, None]
+    return idx.long(), dists.view(b, n, k)

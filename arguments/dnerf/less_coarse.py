@@ -3,20 +3,20 @@ _base_ = './dnerf_default.py'
 USE_FORCE = True
 USE_TIME = True
 BLEND_TIME_FORCE = True
-RESOLUTION = [128, 128, 128]
+RESOLUTION = [64, 64, 64]
 INPUT_DIM = 3
 
 if USE_TIME:
-    RESOLUTION += [256] # 64, 128
+    RESOLUTION += [128] # 64, 128
     INPUT_DIM += 1
 
 if USE_FORCE and not BLEND_TIME_FORCE:
-    RESOLUTION += [256] # [32, 32, 32, 64]
+    RESOLUTION += [128] # [32, 32, 32, 64]
     INPUT_DIM += 1 # 4
 
 OptimizationParams = dict(
-    coarse_iterations = 100, # 10000, # default: 3000
-    anchor_iterations = 5000,
+    coarse_iterations = 1000, # 10000, # default: 3000
+    anchor_iterations = 0,
     iterations = 5000000,
     batch_size = 8,
     scaling_lr = 0.001

@@ -14,11 +14,11 @@ import os, sys
 import torch
 from random import randint
 from utils.loss_utils import l1_loss, ssim, l2_loss, lpips_loss
-from gaussian_renderer.renderer import render, ANCHORS, render_for_state
+from gaussian_renderer.renderer import render, ANCHORS, render_for_state, render_for_hidden
 import sys
 from scene import Scene, GaussianModel
 from scene.cameras import Camera
-from utils.general_utils import safe_state
+from utils.general_utils import safe_state, knn
 from tqdm import tqdm
 from utils.image_utils import psnr
 from argparse import ArgumentParser, Namespace
@@ -38,7 +38,9 @@ EVAL_EVERY = 10000 # 10000
 SAVE_EVERY = 50000
 LOG_EVERY = 500 # 500
 MAX_PHASE = 5
-RECUR = True
+RECUR_STATE = False
+RECUR_HIDDEN = False
+RECUR = RECUR_STATE or RECUR_HIDDEN
 
 # this function gets means3D to cameras, which later can be used for dynamic training?
 @torch.no_grad()
@@ -51,6 +53,17 @@ def get_state(cameras: List[Camera], gaussians: GaussianModel):
         else:
             cam.prev_state = state
         state = render_for_state(cam, gaussians)
+
+@torch.no_grad()
+def get_hidden(cameras: List[Camera], gaussians: GaussianModel):
+    for cam in cameras:
+        # use None (works when switching cameras)
+        if cam.time == 0.0:
+            cam.prev_hidden = None
+        # use hidden from last calculation
+        else:
+            cam.prev_hidden = hidden
+        hidden = render_for_hidden(cam, gaussians)
 
 # [<---video--->]
 # gaussians_coarse --> deform --> gaussian_t1
@@ -69,10 +82,10 @@ def filter_cams(cameras: List[Camera], phase: int) -> List[Camera]:
     return [cam for cam in cameras if cam.frame_step % MAX_PHASE <= phase]
 
 def scene_reconstruction(
-    dataset: GroupParams,
-    opt: GroupParams,
-    hyper: GroupParams,
-    pipe: GroupParams,
+    dataset: ModelParams,
+    opt: OptimizationParams,
+    hyper: ModelHiddenParams,
+    pipe: PipelineParams,
     checkpoint: str,
     gaussians: GaussianModel,
     scene: Scene,
@@ -112,12 +125,14 @@ def scene_reconstruction(
         return
     progress_bar = tqdm(range(first_iter, final_iter), desc="Training progress")
     first_iter += 1
-    test_cams = deepcopy(scene.getTestCameras())
-    train_cams = deepcopy(scene.getTrainCameras())
+    test_cams = scene.getTestCameras()
+    train_cams = scene.getTrainCameras()
     n_train_cams = dataset.n_train_cams
 
-    train_cams_rdm = deepcopy(train_cams)
-    # random.shuffle(train_cams_rdm)
+    if RECUR:
+        train_cams_rdm = deepcopy(train_cams)
+    else:
+        train_cams_rdm = train_cams
 
     # when multiple trajectories, select one train view on each trajectory at random
     _train_cams_selected = [randint(0, cams-1) + sum(n_train_cams[:i]) for i, cams in enumerate(n_train_cams)]
@@ -143,7 +158,10 @@ def scene_reconstruction(
 
         # reshuffle after going through entire data once
         if (iteration % 1000 == 0 or iteration == first_iter) and RECUR:
-            get_state(train_cams_rdm, gaussians)
+            if RECUR_STATE:
+                get_state(train_cams_rdm, gaussians)
+            if RECUR_HIDDEN:
+                get_hidden(train_cams_rdm, gaussians)
         elif (iteration == first_iter or iteration % shuffle_inter == 0) and not RECUR:
             random.shuffle(train_cams_rdm)
         
@@ -157,10 +175,11 @@ def scene_reconstruction(
         radii_tensor = torch.zeros(size=(batch_size, points), device='cuda')
         viewspace_point_tensor = []
         total_momentum_reg = 0
-        total_opacity_reg = 0
+        total_knn_reg = 0
+        # total_opacity_reg = 0
         for _i, query_idx in enumerate(query_idxs):
             train_view = train_cams_rdm[query_idx]
-            image, viewspace_point, visibility_filter, radii, depth, momentum_reg, opacity_reg \
+            image, viewspace_point, visibility_filter, radii, depth, momentum_reg, knn_reg \
                 = render(train_view, gaussians, pipe, background, stage=stage)
             image_tensor[_i] = image
             gt_image_tensor[_i] = train_view.original_image.cuda()
@@ -168,7 +187,8 @@ def scene_reconstruction(
             radii_tensor[_i] = radii
             visibility_tensor[_i] = visibility_filter
             total_momentum_reg += 0.001 * momentum_reg
-            total_opacity_reg += opacity_reg
+            total_knn_reg += knn_reg
+            # total_opacity_reg += opacity_reg
         radii = radii_tensor.max(dim=0).values
         visibility_filter = visibility_tensor.any(dim=0)
 
@@ -186,8 +206,10 @@ def scene_reconstruction(
                 time_weight, l1_reg_weight, l2_reg_weight, plane_weight, force_weight
             )
             loss += tv_loss_dict['total_reg']
+            # total_momentum_reg = total_momentum_reg.clamp(4e-5)
             loss += total_momentum_reg
-            loss += total_opacity_reg
+            loss += total_knn_reg
+            # loss += total_opacity_reg
         else:
             tv_loss_dict = defaultdict(lambda: torch.tensor(0)) # assume to be 0 for coarse
 
@@ -201,7 +223,7 @@ def scene_reconstruction(
         #     lpipsloss = lpips_loss(image_tensor,gt_image_tensor,lpips_model)
         #     loss += opt.lambda_lpips * lpipsloss
         loss.backward()
-        print(f"loss final = {loss}")
+        # print(f"loss final = {loss}")
         viewspace_point_tensor_grad = torch.zeros_like(viewspace_point)
         for idx in range(batch_size):
             viewspace_point_tensor_grad += viewspace_point_tensor[idx].grad
@@ -215,7 +237,8 @@ def scene_reconstruction(
                     "psnr": round(psnr_.item(), 2),
                     "point": points,
                     "mom_reg": total_momentum_reg.item(),
-                    "opa_reg": total_opacity_reg.item()
+                    "knn_reg": total_knn_reg.item(),
+                    # "opa_reg": total_opacity_reg.item()
                 }
                 for aux_loss_name, aux_loss_val in tv_loss_dict.items():
                     infos[aux_loss_name] = aux_loss_val.item()
@@ -232,9 +255,13 @@ def scene_reconstruction(
             
             # if dataset.render_process:
             if (iteration % EVAL_EVERY == EVAL_EVERY - 1) or (iteration == final_iter-1):
-                if RECUR:
-                    get_state(train_cams, gaussians)
+                if RECUR_STATE:
+                    get_state(train_cams_rdm, gaussians)
                     get_state(test_cams, gaussians)
+                    train_views = update_traincams(_train_cams_selected)
+                if RECUR_HIDDEN:
+                    get_hidden(train_cams_rdm, gaussians)
+                    get_hidden(test_cams, gaussians)
                     train_views = update_traincams(_train_cams_selected)
                 avg_l1_test, avg_psnr_test = render_training_image(
                     scene, gaussians, test_cams, pipe, background, stage+"test",
@@ -270,7 +297,7 @@ def scene_reconstruction(
                     opacity_threshold = opt.opacity_threshold_fine_init - iteration * (opt.opacity_threshold_fine_init - opt.opacity_threshold_fine_after) / opt.densify_until_iter
                     densify_threshold = opt.densify_grad_threshold_fine_init - iteration * (opt.densify_grad_threshold_fine_init - opt.densify_grad_threshold_after) / opt.densify_until_iter
                 
-                if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0 and gaussians.get_xyz.shape[0] < 30000:
+                if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0 and gaussians.get_xyz.shape[0] < 40000:
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
                     gaussians.densify(densify_threshold, opacity_threshold, scene.cameras_extent, size_threshold, 5, 5, scene.model_path, iteration, stage)
 
@@ -278,7 +305,7 @@ def scene_reconstruction(
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
                     gaussians.prune(densify_threshold, opacity_threshold, scene.cameras_extent, size_threshold)
                     
-                if iteration % opt.densification_interval == 0 and gaussians.get_xyz.shape[0] < 30000 and opt.add_point:
+                if iteration % opt.densification_interval == 0 and gaussians.get_xyz.shape[0] < 40000 and opt.add_point:
                     gaussians.grow(5, 5, scene.model_path, iteration,stage)
 
                 if iteration % opt.opacity_reset_interval == 0:
@@ -293,7 +320,9 @@ def scene_reconstruction(
 def training(dataset, hyper, opt, pipe, checkpoint, expname, use_wandb, anchors):
     prepare_output_and_logger(args, expname)
     gaussians = GaussianModel(dataset.sh_degree, hyper)
-    gaussians.recur = RECUR
+    gaussians._deformation.recur = RECUR
+    gaussians._deformation.recur_state = RECUR_STATE
+    gaussians._deformation.recur_hidden = RECUR_HIDDEN
     dataset.model_path = args.model_path
     timer = Timer()
     scene = Scene(dataset, gaussians)
@@ -345,24 +374,20 @@ if __name__ == "__main__":
     parser.add_argument("--quiet", action="store_true", default=False)
     parser.add_argument("--anchors", action="store_true", default=False)
     parser.add_argument("--start_checkpoint", type=str, default = None)
-    parser.add_argument("--expnamee", type=str, default = "")
+    parser.add_argument("--expname", type=str, default = "")
     parser.add_argument("--configs", type=str, default = "")
     parser.add_argument("--data_drive", type=str, default='.')
     parser.add_argument("--data_path_train", type=str, nargs='+', default = [])
     parser.add_argument("--data_path_test", type=str, nargs='+', default = [])
     parser.add_argument("--n_train_cams", type=int, nargs='+', default = [])
     parser.add_argument("--n_test_cams", type=int, nargs='+', default = [])
-    
     args = parser.parse_args()
-    # args.source_path_train = args.data_path_train
-    # args.source_path_test = args.data_path_test
     args.data_path_train = [os.path.join(args.data_drive, p) for p in args.data_path_train]
     args.data_path_test = [os.path.join(args.data_drive, p) for p in args.data_path_test]
     lp.n_train_cams = [int(val) for val in args.n_train_cams]
     lp.n_test_cams = [int(val) for val in args.n_test_cams]
     lp.data_path_train = args.data_path_train
     lp.data_path_test = args.data_path_test
-
     assert len(args.n_train_cams) == len(args.data_path_train)
     assert len(args.n_test_cams) == len(args.data_path_test)
 
@@ -373,7 +398,7 @@ if __name__ == "__main__":
         args = merge_hparams(args, config)
 
     if args.wandb:
-        wandb.init(project='4dgs_force', name=args.expname, dir='/sdd/baiting/4DGaussians/')
+        wandb.init(project='4dgs_force', name=args.expname, dir=args.data_drive)
 
     # Initialize system state (RNG)
     safe_state(args.quiet)
