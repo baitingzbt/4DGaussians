@@ -10,3 +10,4 @@ logs
 logs/*
 *.out
 *.pth
+point_cloud/coarse_iteration_99/deformation.pth
