@@ -19,7 +19,7 @@ OptimizationParams = dict(
     anchor_iterations = 0,
     densify_until_iter = 100000,
     iterations = 5000000,
-    batch_size = 8,
+    batch_size = 32,
 )
 
 ModelParams = dict(

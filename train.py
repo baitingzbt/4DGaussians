@@ -34,9 +34,9 @@ from typing import List
 
 to8b = lambda x: (255 * np.clip(x.cpu().numpy(), 0, 1)).astype(np.uint8)
 FRAMES_EACH = int(40)
-EVAL_EVERY = 10000 # 10000
-SAVE_EVERY = 50000
-LOG_EVERY = 500 # 500
+EVAL_EVERY = 2000 # 10000
+SAVE_EVERY = 10000
+LOG_EVERY = 100 # 500
 MAX_PHASE = 5
 RECUR_STATE = False
 RECUR_HIDDEN = False
@@ -145,7 +145,7 @@ def scene_reconstruction(
     # shuffle_inter = int(len(train_cams) / batch_size) + 1
     timer.start()
     train_views = update_traincams(_train_cams_selected)
-    
+
     if "coarse" in stage:
         train_cams = [cam for cam in train_cams if cam.time == 0.0]
         print(f"Coarse using time=0.0 cameras, total of {len(train_cams)} cameras")

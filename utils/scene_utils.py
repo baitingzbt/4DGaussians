@@ -38,7 +38,7 @@ def render_training_image(
     gaussians._deformation.deformation_net.eval()
     times = round(time_now / 60, 2)
     label2 = f"time: {times} mins"
-    def render_helper(viewpoint: Camera) -> np.ndarray:
+    def render_helper(viewpoint: Camera) -> Tuple[np.ndarray, float, float]:
         image = render(viewpoint, gaussians, pipe, background, stage=stage, training=False)[0]
         gt_np = viewpoint.original_image.permute(1, 2, 0).detach().cpu().numpy()
         image_np = image.permute(1, 2, 0).detach().cpu().numpy()  # 转换通道顺序为 (H, W, 3)
