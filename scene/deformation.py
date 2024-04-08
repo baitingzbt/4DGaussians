@@ -7,12 +7,12 @@ from scene.hexplane import HexPlaneField
 from scene.grid import DenseGrid
 
 class Deformation(nn.Module):
-    def __init__(self, D=8, W=256, input_ch=27, input_ch_time=9, grid_pe=0, skips=[], args=None):
+    def __init__(self, D=8, W=256, input_ch=27, grid_pe=0, skips=[], args=None):
         super(Deformation, self).__init__()
         self.D = D
         self.W = W
         self.input_ch = input_ch
-        self.input_ch_time = input_ch_time
+        # self.input_ch_time = input_ch_time
         self.skips = skips
         self.grid_pe = grid_pe
         self.no_grid = args.no_grid
@@ -73,7 +73,7 @@ class Deformation(nn.Module):
         #         nn.ReLU(), nn.Linear(5, 20), nn.ReLU(), nn.Linear(20, 5), nn.ReLU(), nn.Linear(5, 1)
         #     )
         self.force_embedder = nn.Sequential(
-            nn.Linear(4, 4), nn.ReLU(), nn.Linear(4, 1)
+            nn.Linear(2, 1)
         )
 
         if self.blend_time_force:
@@ -92,16 +92,6 @@ class Deformation(nn.Module):
             #     print("force_emb nan before embedder")
             #     breakpoint()
             force_emb = torch.exp(self.force_embedder(force_emb))
-
-            # force_emb = self.force_embedder(force_emb)
-
-            # if torch.isnan(force_emb).any():
-            #     print("force_emb nan after embedder before exp")
-            #     breakpoint()
-            # force_emb = torch.exp(force_emb)
-            # if torch.isnan(force_emb).any():
-            #     print("force_emb nan after embedder after exp")
-            #     breakpoint()
 
         if self.blend_time_force and force_emb is not None:
             time_emb = self.force_time_embed(torch.cat((time_emb, force_emb), dim=1))
@@ -194,21 +184,21 @@ class deform_network(nn.Module):
         posbase_pe= args.posebase_pe
         scale_rotation_pe = args.scale_rotation_pe
         opacity_pe = args.opacity_pe
-        timenet_width = args.timenet_width
-        timenet_output = args.timenet_output
+        # timenet_width = args.timenet_width
+        # timenet_output = args.timenet_output
         grid_pe = args.grid_pe
-        times_ch = 2*timebase_pe+1
-        self.timenet = nn.Sequential(
-            nn.Linear(times_ch, timenet_width),
-            nn.ReLU(),
-            nn.Linear(timenet_width, timenet_output)
-        )
+        # times_ch = 2*timebase_pe+1
+        # self.timenet = nn.Sequential(
+        #     nn.Linear(times_ch, timenet_width),
+        #     nn.ReLU(),
+        #     nn.Linear(timenet_width, timenet_output)
+        # )
         self.deformation_net = Deformation(
             W=net_width,
             D=defor_depth,
             input_ch=(3)+(3*(posbase_pe))*2,
             grid_pe=grid_pe,
-            input_ch_time=timenet_output,
+            # input_ch_time=timenet_output,
             args=args
         )
         self.register_buffer('time_poc', torch.FloatTensor([(2**i) for i in range(timebase_pe)]))
@@ -240,7 +230,7 @@ class deform_network(nn.Module):
         return means3D, scales, rotations, opacity, shs, hidden
     
     def get_mlp_parameters(self):
-        return self.deformation_net.get_mlp_parameters() + list(self.timenet.parameters())
+        return self.deformation_net.get_mlp_parameters() # + list(self.timenet.parameters())
 
     def get_grid_parameters(self):
         return self.deformation_net.get_grid_parameters()

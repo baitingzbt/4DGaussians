@@ -129,10 +129,7 @@ def scene_reconstruction(
     train_cams = scene.getTrainCameras()
     n_train_cams = dataset.n_train_cams
 
-    if RECUR:
-        train_cams_rdm = deepcopy(train_cams)
-    else:
-        train_cams_rdm = train_cams
+    # train_cams_rdm = deepcopy(train_cams)
 
     # when multiple trajectories, select one train view on each trajectory at random
     _train_cams_selected = [randint(0, cams-1) + sum(n_train_cams[:i]) for i, cams in enumerate(n_train_cams)]
@@ -145,9 +142,14 @@ def scene_reconstruction(
         return train_views
 
     batch_size = opt.batch_size
-    shuffle_inter = int(len(train_cams) / batch_size) + 1
+    # shuffle_inter = int(len(train_cams) / batch_size) + 1
     timer.start()
     train_views = update_traincams(_train_cams_selected)
+    
+    if "coarse" in stage:
+        train_cams = [cam for cam in train_cams if cam.time == 0.0]
+        print(f"Coarse using time=0.0 cameras, total of {len(train_cams)} cameras")
+    n_train_views = len(train_cams)
     for iteration in range(first_iter, final_iter):        
 
         gaussians.update_learning_rate(iteration)
@@ -156,17 +158,18 @@ def scene_reconstruction(
         if iteration % 1000 == 0:
             gaussians.oneupSHdegree()
 
-        # reshuffle after going through entire data once
-        if (iteration % 1000 == 0 or iteration == first_iter) and RECUR:
-            if RECUR_STATE:
-                get_state(train_cams_rdm, gaussians)
-            if RECUR_HIDDEN:
-                get_hidden(train_cams_rdm, gaussians)
-        elif (iteration == first_iter or iteration % shuffle_inter == 0) and not RECUR:
-            random.shuffle(train_cams_rdm)
+        # # reshuffle after going through entire data once
+        # if (iteration % 1000 == 0 or iteration == first_iter) and RECUR:
+        #     if RECUR_STATE:
+        #         get_state(train_cams, gaussians)
+        #     if RECUR_HIDDEN:
+        #         get_hidden(train_cams, gaussians)
+        # elif (iteration == first_iter or iteration % shuffle_inter == 0) and not RECUR:
+        #     random.shuffle(train_cams)
         
         # go through dataset sequentially for next <batch_size>
-        query_idxs = [(iteration * batch_size + _i) % len(train_cams_rdm) for _i in range(batch_size)]
+        # query_idxs = [(iteration * batch_size + _i) % len(train_cams) for _i in range(batch_size)]
+        query_idxs = np.random.randint(low=0, high=n_train_views, size=batch_size)
         
         points = gaussians.get_xyz.shape[0]
         image_tensor = torch.zeros(size=(batch_size, 3, 480, 480), device='cuda')
@@ -176,10 +179,10 @@ def scene_reconstruction(
         viewspace_point_tensor = []
         total_momentum_reg = 0
         total_knn_reg = 0
-        # total_opacity_reg = 0
+        total_opacity_reg = 0
         for _i, query_idx in enumerate(query_idxs):
-            train_view = train_cams_rdm[query_idx]
-            image, viewspace_point, visibility_filter, radii, depth, momentum_reg, knn_reg \
+            train_view = train_cams[query_idx]
+            image, viewspace_point, visibility_filter, radii, depth, momentum_reg, opacity_reg, knn_reg \
                 = render(train_view, gaussians, pipe, background, stage=stage)
             image_tensor[_i] = image
             gt_image_tensor[_i] = train_view.original_image.cuda()
@@ -188,7 +191,7 @@ def scene_reconstruction(
             visibility_tensor[_i] = visibility_filter
             total_momentum_reg += 0.001 * momentum_reg
             total_knn_reg += knn_reg
-            # total_opacity_reg += opacity_reg
+            total_opacity_reg += opacity_reg
         radii = radii_tensor.max(dim=0).values
         visibility_filter = visibility_tensor.any(dim=0)
 
@@ -209,7 +212,7 @@ def scene_reconstruction(
             # total_momentum_reg = total_momentum_reg.clamp(4e-5)
             loss += total_momentum_reg
             loss += total_knn_reg
-            # loss += total_opacity_reg
+            loss += total_opacity_reg
         else:
             tv_loss_dict = defaultdict(lambda: torch.tensor(0)) # assume to be 0 for coarse
 
@@ -238,7 +241,7 @@ def scene_reconstruction(
                     "point": points,
                     "mom_reg": total_momentum_reg.item(),
                     "knn_reg": total_knn_reg.item(),
-                    # "opa_reg": total_opacity_reg.item()
+                    "opa_reg": total_opacity_reg.item()
                 }
                 for aux_loss_name, aux_loss_val in tv_loss_dict.items():
                     infos[aux_loss_name] = aux_loss_val.item()
@@ -255,14 +258,14 @@ def scene_reconstruction(
             
             # if dataset.render_process:
             if (iteration % EVAL_EVERY == EVAL_EVERY - 1) or (iteration == final_iter-1):
-                if RECUR_STATE:
-                    get_state(train_cams_rdm, gaussians)
-                    get_state(test_cams, gaussians)
-                    train_views = update_traincams(_train_cams_selected)
-                if RECUR_HIDDEN:
-                    get_hidden(train_cams_rdm, gaussians)
-                    get_hidden(test_cams, gaussians)
-                    train_views = update_traincams(_train_cams_selected)
+                # if RECUR_STATE:
+                #     get_state(train_cams_rdm, gaussians)
+                #     get_state(test_cams, gaussians)
+                #     train_views = update_traincams(_train_cams_selected)
+                # if RECUR_HIDDEN:
+                #     get_hidden(train_cams_rdm, gaussians)
+                #     get_hidden(test_cams, gaussians)
+                #     train_views = update_traincams(_train_cams_selected)
                 avg_l1_test, avg_psnr_test = render_training_image(
                     scene, gaussians, test_cams, pipe, background, stage+"test",
                     iteration, timer.get_elapsed_time(), save_video, save_pointclound, save_images, use_wandb)
@@ -398,7 +401,7 @@ if __name__ == "__main__":
         args = merge_hparams(args, config)
 
     if args.wandb:
-        wandb.init(project='4dgs_force', name=args.expname, dir=args.data_drive)
+        wandb.init(project='4dgs_force', name=args.expname, dir=args.data_drive, settings=wandb.Settings(start_method="fork"))
 
     # Initialize system state (RNG)
     safe_state(args.quiet)

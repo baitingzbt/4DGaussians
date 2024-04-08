@@ -12,6 +12,8 @@ from scene import Scene
 import wandb
 from typing import List, Union, Tuple, Dict
 from .image_utils import psnr_np
+from multiprocessing.pool import ThreadPool
+from tqdm import tqdm
 
 FONT = ImageFont.truetype('./utils/TIMES.TTF', size=40) # 选择字体和字体大小
 TXT_COLOR = (255, 0, 0)  # 白色
@@ -36,25 +38,33 @@ def render_training_image(
     gaussians._deformation.deformation_net.eval()
     times = round(time_now / 60, 2)
     label2 = f"time: {times} mins"
-    all_psnr = []
-    all_test_loss = []
-    def render_helper(viewpoint: Camera, path: str = None) -> np.ndarray:
-        image = render(viewpoint, gaussians, pipe, background, stage=stage)[0]
-        gt_np = viewpoint.original_image.permute(1, 2, 0).cpu().numpy()
-        image_np = image.permute(1, 2, 0).cpu().numpy()  # 转换通道顺序为 (H, W, 3)
-        all_test_loss.append(np.mean(np.square(gt_np - image_np)))
-        all_psnr.append(psnr_np(image_np, gt_np))
-        label1 = f"stage:{stage},iter:{iteration}\nframe_t:{round(viewpoint.time, 2)}\ninten:{viewpoint.force[-1]}"
+    def render_helper(viewpoint: Camera) -> np.ndarray:
+        image = render(viewpoint, gaussians, pipe, background, stage=stage, training=False)[0]
+        gt_np = viewpoint.original_image.permute(1, 2, 0).detach().cpu().numpy()
+        image_np = image.permute(1, 2, 0).detach().cpu().numpy()  # 转换通道顺序为 (H, W, 3)
+        # all_test_loss.append(np.mean(np.square(gt_np - image_np)))
+        # all_psnr.append(psnr_np(image_np, gt_np))
+        loss = np.square(gt_np - image_np).mean()
+        psnr = psnr_np(image_np, gt_np)
+        if viewpoint.force.shape[0] >= 2:
+            force_label = np.ones_like(viewpoint.force)
+            force_label[0] = np.degrees(viewpoint.force[0])
+            force_label[1] = np.degrees(viewpoint.force[1])
+            if viewpoint.force.shape[0] == 3:
+                force_label[2] = viewpoint.force[2]
+        else:
+            force_label = viewpoint.force
+        label1 = f"stage:{stage},iter:{iteration}\nframe_t:{round(viewpoint.time, 2)}\nforce:{force_label}"
         image_np = np.concatenate((gt_np, image_np), axis=1)
         image_with_labels = Image.fromarray((np.clip(image_np, 0, 1) * 255).astype('uint8'))  # 转换为8位图像
         draw1 = ImageDraw.Draw(image_with_labels)
         label2_position = (image_with_labels.width - 100 - len(label2) * 10, 10)  # 右上角坐标
         draw1.text(LABEL1_POS, label1, fill=TXT_COLOR, font=FONT)
         draw1.text(label2_position, label2, fill=TXT_COLOR, font=FONT)
-        if save_images:
-            image_with_labels.save(path)
+        # if save_images:
+        #     image_with_labels.save(path)
         image_with_label_arr = np.array(image_with_labels)
-        return image_with_label_arr
+        return image_with_label_arr, loss, psnr
     
     render_base_path = os.path.join(scene.model_path, f"{stage}_render")
     point_cloud_path = os.path.join(render_base_path, "pointclouds")
@@ -63,11 +73,30 @@ def render_training_image(
     os.makedirs(point_cloud_path, exist_ok=True)
     os.makedirs(image_path, exist_ok=True)
     # image: (3, 800, 800)
+    # all_renders = []
+    # all_psnr = []
+    # all_test_loss = []
+    # for viewpoint in tqdm(viewpoints):
+    #     # image_save_path = os.path.join(image_path, f"{iteration}_{idx}.png") if save_images else None
+    #     img, loss, psnr = render_helper(viewpoint)
+    #     all_renders.append(img)
+    #     all_test_loss.append(loss)
+    #     all_psnr.append(psnr)
+
+    # breakpoint()
+    with ThreadPool(100) as pool:
+        all_renders_infos: List = pool.map(
+            render_helper,
+            viewpoints
+        )
     all_renders = []
-    for idx, viewpoint in enumerate(viewpoints):
-        image_save_path = os.path.join(image_path, f"{iteration}_{idx}.png") if save_images else None
-        image_with_label_arr = render_helper(viewpoint, image_save_path)
-        all_renders.append(image_with_label_arr)
+    all_psnr = []
+    all_test_loss = []
+    for img, loss, psnr in all_renders_infos:
+        all_renders.append(img)
+        all_test_loss.append(loss)
+        all_psnr.append(psnr)
+
     avg_psnr = np.round(np.mean(np.array(all_psnr)), 2)
     avg_l1 = np.mean(np.array(all_test_loss))
     if save_video:
@@ -82,7 +111,7 @@ def render_training_image(
         pc_mask = gaussians.get_opacity
         pc_mask = pc_mask > 0.1
         xyz = gaussians.get_xyz.detach()[pc_mask.squeeze()].cpu().permute(1, 0).numpy()
-        visualize_and_save_point_cloud(xyz, viewpoint.R, viewpoint.T, point_save_path)
+        visualize_and_save_point_cloud(xyz, viewpoints[0].R, viewpoints[0].T, point_save_path)
     
     gaussians._deformation.train()
     gaussians._deformation.deformation_net.train()

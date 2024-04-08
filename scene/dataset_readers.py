@@ -342,6 +342,19 @@ def readCamerasFromShortTransforms(
     return cams
 
 
+import math
+def force_process(force: np.ndarray) -> float:
+    # Calculate the angle in radians using atan2, which takes into account the quadrant
+    theta_radians = math.atan2(math.degrees(force[1]), math.degrees(force[0]))
+    # theta in [0, 180] for our dataset
+    # 200 is a magic number, since the intensities of forces are now [200, 400]
+    # print(f"force in: {force}")
+    if theta_radians < 0:
+        theta_radians += 2 * math.pi
+    # print(f"degrees:", math.degrees(force[1]), math.degrees(force[0]), theta_radians)
+    # print(f"theta_deg:", theta_degrees)
+    return theta_radians
+
 # use with cautious, lots of special case and magic numbers to maximize reading speed
 def readCamShortParallel(
     path: str,
@@ -355,16 +368,15 @@ def readCamShortParallel(
     matrix = -np.linalg.inv(np.array(contents["transform_matrix"]))
     R = np.transpose(matrix[:3, :3])
     R[:, 0] = -R[:, 0]
-    force = np.array(contents['force'])[3:]  #  directly drop positions here
-    force /= np.array([1, 1, 1, 1000])
-    
+    # force = force_process(np.array(contents['force'])[3:])  #  directly drop positions here
+    force = np.array(contents['force'])[3:5] # only keep xy rotations
     frames = contents["frames"]
     def read_fn(idx_frame) -> Camera:
         frame_step, frame = idx_frame
         if frame_step >= MAX_FRAME:
             return None
         image = Image.open(f"{path}/{frame['file_path']}").resize((480, 480))
-        norm_data = np.array(image.convert("RGBA")) / 255.0
+        norm_data = np.array(image.convert("RGBA"), dtype=np.float32) / 255.0
         # assume white_background = True
         arr = norm_data[:, :, :3] * norm_data[:, :, 3:4] + (1 - norm_data[:, :, 3:4])
         cam = Camera(
@@ -381,8 +393,8 @@ def readCamShortParallel(
         )
         return cam
 
-    with ThreadPool(10) as pool2:
-        cams = pool2.map(read_fn, zip(list(range(len(frames))), frames))
+    with ThreadPool(10) as pool:
+        cams = pool.map(read_fn, enumerate(frames))
     return [cam for cam in cams if cam is not None]
 
 def read_force_timeline(paths_train: List[str], paths_test: List[str]):
@@ -392,10 +404,10 @@ def read_force_timeline(paths_train: List[str], paths_test: List[str]):
         with open(os.path.join(path, 'train', 'cam_0', "transforms.json")) as json_file:
             train_json = json.load(json_file)
         time_lines += [frame["time"] for frame in train_json["frames"][:MAX_FRAME]]
-    for path in paths_test:
-        with open(os.path.join(path, 'test', 'cam_0', "transforms.json")) as json_file:
-            test_json = json.load(json_file)
-        time_lines += [frame["time"] for frame in test_json["frames"][:MAX_FRAME]]
+    # for path in paths_test:
+    #     with open(os.path.join(path, 'test', 'cam_0', "transforms.json")) as json_file:
+    #         test_json = json.load(json_file)
+    #     time_lines += [frame["time"] for frame in test_json["frames"][:MAX_FRAME]]
     time_lines = list(sorted(set(time_lines)))
     max_time_float = max(time_lines)
     timestamp_mapper = {t: t / max_time_float for t in time_lines}
@@ -453,11 +465,13 @@ def readForceSyntheticInfo2(
 
     def helper_train(args) -> List[Camera]:
         path, i, force_idx = args
-        return readCamShortParallel(f"{path}/train/cam_{i}", timestamp_mapper, force_idx, i)
+        cam_path = os.path.join(f"{path}/train", os.listdir(f"{path}/train")[i])
+        return readCamShortParallel(cam_path, timestamp_mapper, force_idx, i)
     
     def helper_test(args) -> List[Camera]:
         path, i, force_idx = args
-        return readCamShortParallel(f"{path}/test/cam_{i}", timestamp_mapper, force_idx, i)
+        cam_path = os.path.join(f"{path}/test", os.listdir(f"{path}/test")[i])
+        return readCamShortParallel(cam_path, timestamp_mapper, force_idx, i)
 
     import time
     time_start = time.time()
@@ -474,11 +488,11 @@ def readForceSyntheticInfo2(
     for i, n in enumerate(n_train_cams):
         paths_train_extended.extend([paths_train[i]] * n)
         force_idx_train_extended.extend([i] * n)
-        cam_idx_train_extended.extend([j for j in range(n)])
+        cam_idx_train_extended.extend(list(range(n)))
     for i, n in enumerate(n_test_cams):
         paths_test_extended.extend([paths_test[i]] * n)
         force_idx_test_extended.extend([i] * n)
-        cam_idx_test_extended.extend([j for j in range(n)])
+        cam_idx_test_extended.extend(list(range(n)))
 
     with ThreadPool(20) as pool:
         train_cams: List[List[Camera]] = pool.map(
@@ -497,7 +511,6 @@ def readForceSyntheticInfo2(
     test_cams: List[Camera] = [c for cams in test_cams for c in cams if c is not None]
     # test_cams = list(sorted(test_cams, key = lambda c: (c.force_idx, c.pos_idx, c.time)))
     time_end = time.time()
-
     # for c in test_cams: print(c.force_idx, c.pos_idx, c.time)
     print(f"parallelized total time: {time_end - time_start}")
 
@@ -515,24 +528,24 @@ def readForceSyntheticInfo2(
     )
     return scene_info
 
-def format_infos(dataset,split):
-    # loading
-    cameras = []
-    image = dataset[0][0]
-    if split == "train":
-        for idx in tqdm(range(len(dataset))):
-            image_path = None
-            image_name = f"{idx}"
-            time = dataset.image_times[idx]
-            # matrix = np.linalg.inv(np.array(pose))
-            R,T = dataset.load_pose(idx)
-            FovX = focal2fov(dataset.focal[0], image.shape[1])
-            FovY = focal2fov(dataset.focal[0], image.shape[2])
-            cameras.append(CameraInfo(uid=idx, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
-                                image_path=image_path, image_name=image_name, width=image.shape[2], height=image.shape[1],
-                                time = time, mask=None))
+# def format_infos(dataset,split):
+#     # loading
+#     cameras = []
+#     image = dataset[0][0]
+#     if split == "train":
+#         for idx in tqdm(range(len(dataset))):
+#             image_path = None
+#             image_name = f"{idx}"
+#             time = dataset.image_times[idx]
+#             # matrix = np.linalg.inv(np.array(pose))
+#             R,T = dataset.load_pose(idx)
+#             FovX = focal2fov(dataset.focal[0], image.shape[1])
+#             FovY = focal2fov(dataset.focal[0], image.shape[2])
+#             cameras.append(CameraInfo(uid=idx, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
+#                                 image_path=image_path, image_name=image_name, width=image.shape[2], height=image.shape[1],
+#                                 time = time, mask=None))
 
-    return cameras
+#     return cameras
 
 # def format_render_poses(poses,data_infos):
 #     cameras = []

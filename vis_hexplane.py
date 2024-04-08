@@ -125,7 +125,7 @@ if False:
 
 
 
-if True:
+if False:
     # we try out a few different forces and different times, with fixec xyz
     # we get the corresponding embedding, and see how influential theyr are
     # in the hexplane
@@ -172,7 +172,7 @@ if True:
 
 
 
-if True:
+if False:
     # change point, keep time-force the same
     for pt in points[:5]:
         sample_pt = torch.tensor([[0, 0, 0, 0]], dtype=torch.float32, device='cuda')

@@ -109,11 +109,14 @@ class GaussianModel:
         denom,
         opt_dict, 
         self.spatial_lr_scale) = model_args
-        self._deformation.load_state_dict(deform_state)
+        self._deformation.load_state_dict(deform_state, strict=False)
         self.training_setup(training_args)
         self.xyz_gradient_accum = xyz_gradient_accum
         self.denom = denom
-        self.optimizer.load_state_dict(opt_dict)
+        try:
+            self.optimizer.load_state_dict(opt_dict)
+        except:
+            pass
 
     @property
     def get_scaling(self):

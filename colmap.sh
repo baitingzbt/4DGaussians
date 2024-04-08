@@ -1,5 +1,5 @@
 
-
+# ps aux|grep wandb|grep baiting|grep -v grep | awk '{print $2}'|xargs kill
 workdir=$1
 datatype=$2 # blender, hypernerf, llff
 export CUDA_VISIBLE_DEVICES=0
