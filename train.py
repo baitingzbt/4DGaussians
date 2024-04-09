@@ -34,7 +34,7 @@ from typing import List
 
 to8b = lambda x: (255 * np.clip(x.cpu().numpy(), 0, 1)).astype(np.uint8)
 FRAMES_EACH = int(40)
-EVAL_EVERY = 2000 # 10000
+EVAL_EVERY = 1000 # 10000
 SAVE_EVERY = 10000
 LOG_EVERY = 100 # 500
 MAX_PHASE = 5
@@ -169,8 +169,8 @@ def scene_reconstruction(
         
         # go through dataset sequentially for next <batch_size>
         # query_idxs = [(iteration * batch_size + _i) % len(train_cams) for _i in range(batch_size)]
-        query_idxs = np.random.randint(low=0, high=n_train_views, size=batch_size)
-        
+        # query_idxs = np.random.randint(low=0, high=n_train_views, size=batch_size)
+        query_idxs = np.random.choice(range(n_train_views), batch_size, replace=False)
         points = gaussians.get_xyz.shape[0]
         image_tensor = torch.zeros(size=(batch_size, 3, 480, 480), device='cuda')
         gt_image_tensor = torch.zeros(size=(batch_size, 3, 480, 480), device='cuda')
@@ -300,15 +300,15 @@ def scene_reconstruction(
                     opacity_threshold = opt.opacity_threshold_fine_init - iteration * (opt.opacity_threshold_fine_init - opt.opacity_threshold_fine_after) / opt.densify_until_iter
                     densify_threshold = opt.densify_grad_threshold_fine_init - iteration * (opt.densify_grad_threshold_fine_init - opt.densify_grad_threshold_after) / opt.densify_until_iter
                 
-                if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0 and gaussians.get_xyz.shape[0] < 40000:
+                if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0 and gaussians.get_xyz.shape[0] < 20000:
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
                     gaussians.densify(densify_threshold, opacity_threshold, scene.cameras_extent, size_threshold, 5, 5, scene.model_path, iteration, stage)
 
-                if iteration > opt.pruning_from_iter and iteration % opt.pruning_interval == 0 and gaussians.get_xyz.shape[0] > 20000:
+                if iteration > opt.pruning_from_iter and iteration % opt.pruning_interval == 0 and gaussians.get_xyz.shape[0] > 10000:
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
                     gaussians.prune(densify_threshold, opacity_threshold, scene.cameras_extent, size_threshold)
                     
-                if iteration % opt.densification_interval == 0 and gaussians.get_xyz.shape[0] < 40000 and opt.add_point:
+                if iteration % opt.densification_interval == 0 and gaussians.get_xyz.shape[0] < 20000 and opt.add_point:
                     gaussians.grow(5, 5, scene.model_path, iteration,stage)
 
                 if iteration % opt.opacity_reset_interval == 0:
@@ -363,7 +363,7 @@ def setup_seed(seed):
     torch.backends.cudnn.deterministic = True
 
 if __name__ == "__main__":
-    torch.cuda.empty_cache()
+    # torch.cuda.empty_cache()
     torch.set_default_dtype(torch.float32)
     torch.set_default_tensor_type('torch.FloatTensor')
     parser = ArgumentParser(description="Training script parameters")

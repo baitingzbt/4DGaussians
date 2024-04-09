@@ -168,7 +168,7 @@ def render(
         momentum_reg = torch.abs(means3D_nxt + means3D_prev - 2 * means3D_final).mean()
         opacity_reg = torch.abs(opa_nxt + opa_prev - 2 * opacity_final).mean()
         ############# KNN rigid - nearby points have similar velo ###############
-        velocity = (means3D_nxt - means3D_prev) / 2 # approxiamtion?
+        velocity = (means3D_nxt - means3D_prev) / 2 # approxiamtion
         # opa_diff = abs(opacity_final - opa_prev) + abs(opacity_final - opa_nxt)
         k = 10
         idx, dist = knn(

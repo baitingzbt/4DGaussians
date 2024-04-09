@@ -86,12 +86,12 @@ class Deformation(nn.Module):
 
     def query_time_force(self, rays_pts_emb, time_emb, force_emb, hidden):
         ''' embedding force from dim4 to dim1, to reduce numerical instability '''
-        if force_emb is not None:  # NOTE: if use_force = True
-            # force_emb_cpy = torch.clone(force_emb)
-            # if torch.isnan(force_emb).any():
-            #     print("force_emb nan before embedder")
-            #     breakpoint()
-            force_emb = torch.exp(self.force_embedder(force_emb))
+        # if force_emb is not None:  # NOTE: if use_force = True
+        #     # force_emb_cpy = torch.clone(force_emb)
+        #     # if torch.isnan(force_emb).any():
+        #     #     print("force_emb nan before embedder")
+        #     #     breakpoint()
+        #     force_emb = torch.exp(self.force_embedder(force_emb))
 
         if self.blend_time_force and force_emb is not None:
             time_emb = self.force_time_embed(torch.cat((time_emb, force_emb), dim=1))
@@ -128,14 +128,12 @@ class Deformation(nn.Module):
         if self.args.no_dx:
             pts = rays_pts_emb[:, :3]
         else:
-            dx = self.pos_deform(hidden)
-            pts = rays_pts_emb[:, :3] * mask + dx
+            pts = rays_pts_emb[:, :3] * mask + self.pos_deform(hidden)
 
         if self.args.no_ds:
             scales = scales_emb[:, :3]
         else:
-            ds = self.scales_deform(hidden)
-            scales = scales_emb[:, :3] * mask + ds
+            scales = scales_emb[:, :3] * mask + self.scales_deform(hidden)
 
         if self.args.no_dr:
             rotations = rotations_emb[:, :4]
@@ -149,14 +147,12 @@ class Deformation(nn.Module):
         if self.args.no_do:
             opacity = opacity_emb[:, :1] 
         else:
-            do = self.opacity_deform(hidden) 
-            opacity = opacity_emb[:, :1] * mask + do
+            opacity = opacity_emb[:, :1] * mask + self.opacity_deform(hidden) 
 
         if self.args.no_dshs:
             shs = shs_emb
         else:
-            dshs = self.shs_deform(hidden).reshape([shs_emb.shape[0], 16, 3])
-            shs = shs_emb * mask.unsqueeze(-1) + dshs
+            shs = shs_emb * mask.unsqueeze(-1) + self.shs_deform(hidden).reshape([shs_emb.shape[0], 16, 3])
 
         return pts, scales, rotations, opacity, shs, hidden
     

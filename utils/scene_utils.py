@@ -46,14 +46,14 @@ def render_training_image(
         # all_psnr.append(psnr_np(image_np, gt_np))
         loss = np.square(gt_np - image_np).mean()
         psnr = psnr_np(image_np, gt_np)
-        if viewpoint.force.shape[0] >= 2:
-            force_label = np.ones_like(viewpoint.force)
-            force_label[0] = np.degrees(viewpoint.force[0])
-            force_label[1] = np.degrees(viewpoint.force[1])
-            if viewpoint.force.shape[0] == 3:
-                force_label[2] = viewpoint.force[2]
-        else:
-            force_label = viewpoint.force
+        # if isinstance(viewpoint.force, float) or viewpoint.force.shape[0] < 2:
+        force_label = viewpoint.full_force
+        # else:
+        #     force_label = np.ones_like(viewpoint.full_force)
+        #     force_label[0] = np.degrees(viewpoint.full_force[0])
+        #     force_label[1] = np.degrees(viewpoint.full_force[1])
+        #     if viewpoint.force.shape[0] == 3:
+        #         force_label[2] = viewpoint.force[2]
         label1 = f"stage:{stage},iter:{iteration}\nframe_t:{round(viewpoint.time, 2)}\nforce:{force_label}"
         image_np = np.concatenate((gt_np, image_np), axis=1)
         image_with_labels = Image.fromarray((np.clip(image_np, 0, 1) * 255).astype('uint8'))  # 转换为8位图像
@@ -100,7 +100,7 @@ def render_training_image(
     avg_psnr = np.round(np.mean(np.array(all_psnr)), 2)
     avg_l1 = np.mean(np.array(all_test_loss))
     if save_video:
-        video_path = os.path.join(image_path, f'{iteration}.mp4')
+        video_path = os.path.join(image_path, f'{stage}_{iteration}.mp4')
         clip = ImageSequenceClip(all_renders, with_mask=False, fps=30)
         clip.write_videofile(video_path, logger=None)
         if use_wandb:

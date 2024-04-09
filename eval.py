@@ -48,10 +48,31 @@ def evaluate(dataset, hyper, opt, pipe, checkpoint, expname):
     #                 save_video=True, save_pointclound=False, save_images=False, use_wandb=False
     #             )
     #             scene.model_path = scene.model_path[:-2]
+    all_cams = scene.getTestCameras()
+    set1 = [cam for cam in all_cams if int(np.degrees(cam.full_force[0])) % 45 == 0] # in [-90, -45, 0, 45, 90]
+    set2 = [cam for cam in all_cams if abs(int(np.degrees(cam.full_force[0])) % 45) <= 10 and abs(int(np.degrees(cam.full_force[0])) % 45) != 0]
+    set3 = [cam for cam in all_cams if abs(int(np.degrees(cam.full_force[0])) % 45) > 10]
+
+    # set1 = [cam for cam in all_cams if int(np.degrees(cam.force * 720))] # in [-90, -45, 0, 45, 90]
+    # set2 = [cam for cam in all_cams if int(np.degrees(cam.force * 720))]
+    # set3 = [cam for cam in all_cams if int(np.degrees(cam.force * 720))]
+    # breakpoint()
     render_training_image(
-        scene, gaussians, scene.getTestCameras(), pipe, background, "fine", first_iter, 0.0,
+        scene, gaussians, set1, pipe, background, "fine_train", first_iter, 0.0,
         save_video=True, save_pointclound=False, save_images=False, use_wandb=False
     )
+    render_training_image(
+        scene, gaussians, set2, pipe, background, "fine_test_sim", first_iter, 0.0,
+        save_video=True, save_pointclound=False, save_images=False, use_wandb=False
+    )
+    render_training_image(
+        scene, gaussians, set3, pipe, background, "fine_test_far", first_iter, 0.0,
+        save_video=True, save_pointclound=False, save_images=False, use_wandb=False
+    )
+    # render_training_image(
+    #     scene, gaussians, all_cams, pipe, background, "fine_test_all", first_iter, 0.0,
+    #     save_video=True, save_pointclound=False, save_images=False, use_wandb=False
+    # )
 
 
 if __name__ == "__main__":

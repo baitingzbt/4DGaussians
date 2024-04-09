@@ -353,7 +353,24 @@ def force_process(force: np.ndarray) -> float:
         theta_radians += 2 * math.pi
     # print(f"degrees:", math.degrees(force[1]), math.degrees(force[0]), theta_radians)
     # print(f"theta_deg:", theta_degrees)
+    # new_force = np.zeros(2)
+    # new_force[0] = theta_radians
+    # new_force[2] = force[-1]
     return theta_radians
+
+def force_process2(force: np.ndarray) -> float:
+    # Calculate the angle in radians using atan2, which takes into account the quadrant
+    theta_radians = math.atan2(math.degrees(force[1]), math.degrees(force[0]))
+    
+    # Convert radians to degrees
+    theta_degrees = math.degrees(theta_radians) / 720
+    
+    # Normalize the angle to be within [0, 360) degrees
+    # if theta_degrees < 0:
+    #     theta_degrees += 360
+    
+    # print(f"{math.degrees(force[1])}, {math.degrees(force[0])} -> {theta_degrees = }")
+    return theta_degrees
 
 # use with cautious, lots of special case and magic numbers to maximize reading speed
 def readCamShortParallel(
@@ -368,8 +385,8 @@ def readCamShortParallel(
     matrix = -np.linalg.inv(np.array(contents["transform_matrix"]))
     R = np.transpose(matrix[:3, :3])
     R[:, 0] = -R[:, 0]
-    # force = force_process(np.array(contents['force'])[3:])  #  directly drop positions here
-    force = np.array(contents['force'])[3:5] # only keep xy rotations
+    force = force_process2(np.array(contents['force'])[3:])  #  directly drop positions here
+    # force = np.array(contents['force'])[3:5] # only keep xy rotations
     frames = contents["frames"]
     def read_fn(idx_frame) -> Camera:
         frame_step, frame = idx_frame
@@ -388,6 +405,7 @@ def readCamShortParallel(
             time=mapper[frame["time"]],
             frame_step=frame_step,
             force=force,
+            full_force=np.array(contents['force'])[3:5],
             force_idx=force_idx,
             pos_idx=pos_idx
         )
@@ -513,7 +531,7 @@ def readForceSyntheticInfo2(
     time_end = time.time()
     # for c in test_cams: print(c.force_idx, c.pos_idx, c.time)
     print(f"parallelized total time: {time_end - time_start}")
-
+    # breakpoint()
     num_pts = 2000
     # We create random points inside the bounds of the synthetic Blender scenes
     xyz = np.random.random((num_pts, 3)) * 2.6 - 1.3
