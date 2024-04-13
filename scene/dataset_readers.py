@@ -25,8 +25,8 @@ from utils.sh_utils import SH2RGB
 from scene.gaussian_model import BasicPointCloud
 from utils.general_utils import PILtoTorch
 from tqdm import tqdm
-
-MAX_FRAME = 40
+MAX_FRAME = 8
+START_FRAME = 1 # 0: use all frames, otherwise drops first n frames
 
 class CameraInfo(NamedTuple):
     uid: int
@@ -274,7 +274,7 @@ def readCamerasFromTransforms(
     fovx = contents['camera_angle_x'] if 'camera_angle_x' in contents.keys() \
         else focal2fov(contents['fl_x'],contents['w'])
     for idx, frame in enumerate(contents["frames"]):
-        if idx >= MAX_FRAME:
+        if idx >= MAX_FRAME or idx < START_FRAME:
             break
         cam_name = os.path.join(path, frame["file_path"] + extension)
         time = mapper[frame["time"]]
@@ -379,18 +379,18 @@ def readCamShortParallel(
     force_idx: int,
     pos_idx: int
 ) -> List[Camera]:
-    cams = []
+    cams: List[Camera] = []
     with open(f"{path}/transforms_short.json") as json_file:
         contents: Dict = json.load(json_file)
     matrix = -np.linalg.inv(np.array(contents["transform_matrix"]))
     R = np.transpose(matrix[:3, :3])
     R[:, 0] = -R[:, 0]
-    force = force_process2(np.array(contents['force'])[3:])  #  directly drop positions here
-    # force = np.array(contents['force'])[3:5] # only keep xy rotations
+    # force = force_process2(np.array(contents['force'])[3:])  #  directly drop positions here
+    force = np.array(contents['force'])[3:] # only keep xy rotations
     frames = contents["frames"]
     def read_fn(idx_frame) -> Camera:
         frame_step, frame = idx_frame
-        if frame_step >= MAX_FRAME:
+        if frame_step >= MAX_FRAME or frame_step < START_FRAME:
             return None
         image = Image.open(f"{path}/{frame['file_path']}").resize((480, 480))
         norm_data = np.array(image.convert("RGBA"), dtype=np.float32) / 255.0
@@ -418,14 +418,16 @@ def readCamShortParallel(
 def read_force_timeline(paths_train: List[str], paths_test: List[str]):
     # read from each force's subfolder
     time_lines = []
-    for path in paths_train:
-        with open(os.path.join(path, 'train', 'cam_0', "transforms.json")) as json_file:
+    for path in os.listdir(os.path.join(paths_train[0], 'train')):
+        with open(os.path.join(paths_train[0], 'train', path, "transforms.json")) as json_file:
             train_json = json.load(json_file)
-        time_lines += [frame["time"] for frame in train_json["frames"][:MAX_FRAME]]
-    # for path in paths_test:
-    #     with open(os.path.join(path, 'test', 'cam_0', "transforms.json")) as json_file:
-    #         test_json = json.load(json_file)
-    #     time_lines += [frame["time"] for frame in test_json["frames"][:MAX_FRAME]]
+        time_lines += [frame["time"] for frame in train_json["frames"][START_FRAME:MAX_FRAME]]
+        break  # just use 1 train cam and 1 test cam's time
+    for path in os.listdir(os.path.join(paths_test[0], 'test')):
+        with open(os.path.join(paths_test[0], 'test', path, "transforms.json")) as json_file:
+            test_json = json.load(json_file)
+        time_lines += [frame["time"] for frame in test_json["frames"][START_FRAME:MAX_FRAME]]
+        break  # just use 1 train cam and 1 test cam's time
     time_lines = list(sorted(set(time_lines)))
     max_time_float = max(time_lines)
     timestamp_mapper = {t: t / max_time_float for t in time_lines}

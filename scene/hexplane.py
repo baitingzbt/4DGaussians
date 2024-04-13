@@ -51,8 +51,8 @@ def init_grid_param(
     in_dim: int,
     out_dim: int,
     reso: Sequence[int],
-    a: float = 0.5,
-    b: float = 1.5
+    a: float = 0.1,
+    b: float = 0.5
 ):
     # print(f"grid_nd = {grid_nd}\nin_dim = {in_dim}\nout_dim = {out_dim}\nlen(reso) = {len(reso)}")
     # breakpoint()

@@ -73,7 +73,7 @@ class Deformation(nn.Module):
         #         nn.ReLU(), nn.Linear(5, 20), nn.ReLU(), nn.Linear(20, 5), nn.ReLU(), nn.Linear(5, 1)
         #     )
         self.force_embedder = nn.Sequential(
-            nn.Linear(2, 1)
+            nn.Linear(4, 1)
         )
 
         if self.blend_time_force:
@@ -86,12 +86,8 @@ class Deformation(nn.Module):
 
     def query_time_force(self, rays_pts_emb, time_emb, force_emb, hidden):
         ''' embedding force from dim4 to dim1, to reduce numerical instability '''
-        # if force_emb is not None:  # NOTE: if use_force = True
-        #     # force_emb_cpy = torch.clone(force_emb)
-        #     # if torch.isnan(force_emb).any():
-        #     #     print("force_emb nan before embedder")
-        #     #     breakpoint()
-        #     force_emb = torch.exp(self.force_embedder(force_emb))
+        if force_emb is not None:  # NOTE: if use_force = True
+            force_emb = torch.exp(self.force_embedder(force_emb))
 
         if self.blend_time_force and force_emb is not None:
             time_emb = self.force_time_embed(torch.cat((time_emb, force_emb), dim=1))

@@ -31,12 +31,13 @@ from utils.scene_utils import render_training_image
 from copy import deepcopy
 from collections import defaultdict
 from typing import List
+from scene.dataset_readers import START_FRAME, MAX_FRAME
 
 to8b = lambda x: (255 * np.clip(x.cpu().numpy(), 0, 1)).astype(np.uint8)
-FRAMES_EACH = int(40)
-EVAL_EVERY = 1000 # 10000
-SAVE_EVERY = 10000
-LOG_EVERY = 100 # 500
+FRAMES_EACH = MAX_FRAME - START_FRAME
+EVAL_EVERY = 10000 # 10000
+SAVE_EVERY = 50000
+LOG_EVERY = 500 # 500
 MAX_PHASE = 5
 RECUR_STATE = False
 RECUR_HIDDEN = False
@@ -47,7 +48,7 @@ RECUR = RECUR_STATE or RECUR_HIDDEN
 def get_state(cameras: List[Camera], gaussians: GaussianModel):
     for cam in cameras:
         # use coarse means3D (works when switching cameras)
-        if cam.time == 0.0:
+        if cam.time == START_FRAME / FRAMES_EACH:
             cam.prev_state = None
         # use means3D from last calculation
         else:
@@ -129,8 +130,6 @@ def scene_reconstruction(
     train_cams = scene.getTrainCameras()
     n_train_cams = dataset.n_train_cams
 
-    # train_cams_rdm = deepcopy(train_cams)
-
     # when multiple trajectories, select one train view on each trajectory at random
     _train_cams_selected = [randint(0, cams-1) + sum(n_train_cams[:i]) for i, cams in enumerate(n_train_cams)]
 
@@ -142,13 +141,12 @@ def scene_reconstruction(
         return train_views
 
     batch_size = opt.batch_size
-    # shuffle_inter = int(len(train_cams) / batch_size) + 1
     timer.start()
     train_views = update_traincams(_train_cams_selected)
 
-    if "coarse" in stage:
-        train_cams = [cam for cam in train_cams if cam.time == 0.0]
-        print(f"Coarse using time=0.0 cameras, total of {len(train_cams)} cameras")
+    # if "coarse" in stage:
+    #     train_cams = [cam for cam in train_cams if cam.time == START_FRAME / FRAMES_EACH]
+    #     print(f"Coarse using time={START_FRAME / FRAMES_EACH} cameras, total of {len(train_cams)} cameras")
     n_train_views = len(train_cams)
     for iteration in range(first_iter, final_iter):        
 
@@ -158,18 +156,14 @@ def scene_reconstruction(
         if iteration % 1000 == 0:
             gaussians.oneupSHdegree()
 
-        # # reshuffle after going through entire data once
-        # if (iteration % 1000 == 0 or iteration == first_iter) and RECUR:
-        #     if RECUR_STATE:
-        #         get_state(train_cams, gaussians)
-        #     if RECUR_HIDDEN:
-        #         get_hidden(train_cams, gaussians)
-        # elif (iteration == first_iter or iteration % shuffle_inter == 0) and not RECUR:
-        #     random.shuffle(train_cams)
+        # reshuffle after going through entire data once
+        if (iteration % 1000 == 0 or iteration == first_iter) and RECUR:
+            if RECUR_STATE:
+                get_state(train_cams, gaussians)
+            if RECUR_HIDDEN:
+                get_hidden(train_cams, gaussians)
         
         # go through dataset sequentially for next <batch_size>
-        # query_idxs = [(iteration * batch_size + _i) % len(train_cams) for _i in range(batch_size)]
-        # query_idxs = np.random.randint(low=0, high=n_train_views, size=batch_size)
         query_idxs = np.random.choice(range(n_train_views), batch_size, replace=False)
         points = gaussians.get_xyz.shape[0]
         image_tensor = torch.zeros(size=(batch_size, 3, 480, 480), device='cuda')
@@ -258,14 +252,14 @@ def scene_reconstruction(
             
             # if dataset.render_process:
             if (iteration % EVAL_EVERY == EVAL_EVERY - 1) or (iteration == final_iter-1):
-                # if RECUR_STATE:
-                #     get_state(train_cams_rdm, gaussians)
-                #     get_state(test_cams, gaussians)
-                #     train_views = update_traincams(_train_cams_selected)
-                # if RECUR_HIDDEN:
-                #     get_hidden(train_cams_rdm, gaussians)
-                #     get_hidden(test_cams, gaussians)
-                #     train_views = update_traincams(_train_cams_selected)
+                if RECUR_STATE:
+                    get_state(train_cams, gaussians)
+                    get_state(test_cams, gaussians)
+                    train_views = update_traincams(_train_cams_selected)
+                if RECUR_HIDDEN:
+                    get_hidden(train_cams, gaussians)
+                    get_hidden(test_cams, gaussians)
+                    train_views = update_traincams(_train_cams_selected)
                 avg_l1_test, avg_psnr_test = render_training_image(
                     scene, gaussians, test_cams, pipe, background, stage+"test",
                     iteration, timer.get_elapsed_time(), save_video, save_pointclound, save_images, use_wandb)
@@ -300,15 +294,15 @@ def scene_reconstruction(
                     opacity_threshold = opt.opacity_threshold_fine_init - iteration * (opt.opacity_threshold_fine_init - opt.opacity_threshold_fine_after) / opt.densify_until_iter
                     densify_threshold = opt.densify_grad_threshold_fine_init - iteration * (opt.densify_grad_threshold_fine_init - opt.densify_grad_threshold_after) / opt.densify_until_iter
                 
-                if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0 and gaussians.get_xyz.shape[0] < 20000:
+                if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0 and gaussians.get_xyz.shape[0] < 8000:
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
                     gaussians.densify(densify_threshold, opacity_threshold, scene.cameras_extent, size_threshold, 5, 5, scene.model_path, iteration, stage)
 
-                if iteration > opt.pruning_from_iter and iteration % opt.pruning_interval == 0 and gaussians.get_xyz.shape[0] > 10000:
+                if iteration > opt.pruning_from_iter and iteration % opt.pruning_interval == 0 and gaussians.get_xyz.shape[0] > 4000:
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
                     gaussians.prune(densify_threshold, opacity_threshold, scene.cameras_extent, size_threshold)
                     
-                if iteration % opt.densification_interval == 0 and gaussians.get_xyz.shape[0] < 20000 and opt.add_point:
+                if iteration % opt.densification_interval == 0 and gaussians.get_xyz.shape[0] < 8000 and opt.add_point:
                     gaussians.grow(5, 5, scene.model_path, iteration,stage)
 
                 if iteration % opt.opacity_reset_interval == 0:

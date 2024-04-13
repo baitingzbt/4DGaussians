@@ -33,7 +33,7 @@ ModelHiddenParams = dict(
         'output_coordinate_dim': 128, # 64, 128
         'resolution': RESOLUTION
     },
-    defor_depth = 4,
+    defor_depth = 3,
     use_force = USE_FORCE,
     use_time = USE_TIME,
     blend_time_force = BLEND_TIME_FORCE,

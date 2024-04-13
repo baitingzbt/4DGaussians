@@ -19,7 +19,7 @@ OptimizationParams = dict(
     anchor_iterations = 0,
     densify_until_iter = 100000,
     iterations = 5000000,
-    batch_size = 32
+    batch_size = 8
 )
 
 ModelParams = dict(
@@ -34,7 +34,7 @@ ModelHiddenParams = dict(
         'resolution': RESOLUTION
     },
     # bounds=2.0,
-    defor_depth = 4,
+    defor_depth = 3,
     use_force = USE_FORCE,
     use_time = USE_TIME,
     blend_time_force = BLEND_TIME_FORCE,

@@ -18,6 +18,7 @@ from utils.sh_utils import eval_sh
 import numpy as np
 from copy import deepcopy
 from utils.general_utils import knn
+from scene.dataset_readers import START_FRAME, MAX_FRAME
 
 # ANCHORS = np.array([
 #     0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1.0
@@ -139,8 +140,8 @@ def render(
         if "anchor" in stage:
             _time = cast_time_to_anchor(_time)
         time = torch.tensor(_time).to(dtype=torch.float32, device=device).repeat(n_points, 1)
-        time_prev = torch.ones_like(time) * (_time - 1/39)
-        time_nxt = torch.ones_like(time) * (_time + 1/39)
+        time_prev = torch.ones_like(time) * (_time - 1 / (MAX_FRAME - START_FRAME))
+        time_nxt = torch.ones_like(time) * (_time + 1 / (MAX_FRAME - START_FRAME))
         force = torch.tensor(_force).to(dtype=torch.float32, device=device).repeat(n_points, 1)
         if viewpoint_camera.prev_state is not None and pc._deformation.recur_state:
             means3D = viewpoint_camera.prev_state['means3D']
