@@ -87,7 +87,7 @@ class Deformation(nn.Module):
     def query_time_force(self, rays_pts_emb, time_emb, force_emb, hidden):
         ''' embedding force from dim4 to dim1, to reduce numerical instability '''
         if force_emb is not None:  # NOTE: if use_force = True
-            force_emb = torch.exp(self.force_embedder(force_emb))
+            force_emb = self.force_embedder(force_emb)
 
         if self.blend_time_force and force_emb is not None:
             time_emb = self.force_time_embed(torch.cat((time_emb, force_emb), dim=1))
@@ -108,10 +108,10 @@ class Deformation(nn.Module):
     def get_empty_ratio(self):
         return self.ratio
 
-    def forward_dynamic(self, rays_pts_emb, scales_emb, rotations_emb, opacity_emb, shs_emb, time_feature, time_emb, force_emb, hidden):
+    def forward_dynamic(self, rays_pts_emb, scales_emb, rotations_emb, opacity_emb, shs_emb, time_feature, time_emb, force_emb, hidden_emb):
         time_input = time_emb[:, :1] if self.args.use_time else None
         force_input = force_emb if self.args.use_force else None
-        hidden = self.query_time_force(rays_pts_emb, time_input, force_input, hidden)
+        hidden = self.query_time_force(rays_pts_emb, time_input, force_input, hidden_emb)
 
         if self.args.static_mlp:
             mask = self.static_mlp(hidden)
@@ -210,14 +210,14 @@ class deform_network(nn.Module):
     def get_empty_ratio(self):
         return self.deformation_net.get_empty_ratio
     
-    def forward_dynamic(self, points, scales, rotations, opacity, shs, times_sel, force, hidden):
-        point_emb = poc_fre(points, self.pos_poc)
-        scales_emb = poc_fre(scales, self.rotation_scaling_poc)
-        rotations_emb = poc_fre(rotations, self.rotation_scaling_poc)
-        if hidden is None and self.recur:
-            hidden = torch.zeros((point_emb.shape[0], 64), dtype=torch.float32, device='cuda')
+    def forward_dynamic(self, points_in, scales_in, rotations_in, opacity_in, shs_in, times_sel_in, force_in, hidden_in):
+        point_emb = poc_fre(points_in, self.pos_poc)
+        scales_emb = poc_fre(scales_in, self.rotation_scaling_poc)
+        rotations_emb = poc_fre(rotations_in, self.rotation_scaling_poc)
+        if hidden_in is None and self.recur:
+            hidden_in = torch.zeros((point_emb.shape[0], 64), dtype=torch.float32, device='cuda')
         means3D, scales, rotations, opacity, shs, hidden = self.deformation_net.forward_dynamic(
-            point_emb, scales_emb, rotations_emb, opacity, shs, None, times_sel, force, hidden
+            point_emb, scales_emb, rotations_emb, opacity_in, shs_in, None, times_sel_in, force_in, hidden_in
         )
         return means3D, scales, rotations, opacity, shs, hidden
     

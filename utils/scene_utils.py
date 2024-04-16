@@ -101,7 +101,7 @@ def render_training_image(
     avg_l1 = np.mean(np.array(all_test_loss))
     if save_video:
         video_path = os.path.join(image_path, f'{stage}_{iteration}.mp4')
-        clip = ImageSequenceClip(all_renders, with_mask=False, fps=30)
+        clip = ImageSequenceClip(all_renders, with_mask=False, fps=3)
         clip.write_videofile(video_path, logger=None)
         if use_wandb:
             wandb.log({f'video_{stage}': wandb.Video(video_path)})

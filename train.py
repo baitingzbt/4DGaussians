@@ -38,14 +38,14 @@ FRAMES_EACH = MAX_FRAME - START_FRAME
 EVAL_EVERY = 10000 # 10000
 SAVE_EVERY = 50000
 LOG_EVERY = 500 # 500
-MAX_PHASE = 5
-RECUR_STATE = False
+MAX_PHASE = 8
+RECUR_STATE = True
 RECUR_HIDDEN = False
 RECUR = RECUR_STATE or RECUR_HIDDEN
 
 # this function gets means3D to cameras, which later can be used for dynamic training?
 @torch.no_grad()
-def get_state(cameras: List[Camera], gaussians: GaussianModel):
+def get_state(cameras: List[Camera], gaussians: GaussianModel) -> List[Camera]:
     for cam in cameras:
         # use coarse means3D (works when switching cameras)
         if cam.time == START_FRAME / FRAMES_EACH:
@@ -54,9 +54,10 @@ def get_state(cameras: List[Camera], gaussians: GaussianModel):
         else:
             cam.prev_state = state
         state = render_for_state(cam, gaussians)
+    return cameras
 
 @torch.no_grad()
-def get_hidden(cameras: List[Camera], gaussians: GaussianModel):
+def get_hidden(cameras: List[Camera], gaussians: GaussianModel) -> List[Camera]:
     for cam in cameras:
         # use None (works when switching cameras)
         if cam.time == 0.0:
@@ -65,6 +66,7 @@ def get_hidden(cameras: List[Camera], gaussians: GaussianModel):
         else:
             cam.prev_hidden = hidden
         hidden = render_for_hidden(cam, gaussians)
+    return cameras
 
 # [<---video--->]
 # gaussians_coarse --> deform --> gaussian_t1
@@ -96,8 +98,9 @@ def scene_reconstruction(
     save_video: bool = True,
     save_images: bool = False,
     save_pointclound: bool = True,
+    phase: int = None
 ):
-
+    pipe.debug = True
     if stage == "coarse":
         train_iter = opt.coarse_iterations
     elif stage == "anchor":
@@ -128,25 +131,34 @@ def scene_reconstruction(
     first_iter += 1
     test_cams = scene.getTestCameras()
     train_cams = scene.getTrainCameras()
-    n_train_cams = dataset.n_train_cams
+    # n_train_cams = dataset.n_train_cams
 
     # when multiple trajectories, select one train view on each trajectory at random
-    _train_cams_selected = [randint(0, cams-1) + sum(n_train_cams[:i]) for i, cams in enumerate(n_train_cams)]
+    # _train_cams_selected = [randint(0, cams-1) + sum(n_train_cams[:i]) for i, cams in enumerate(n_train_cams)]
 
     # help to get the most updated train views for dynamic model
-    def update_traincams(cams_selected: List[int]) -> List[Camera]:
-        train_views = []
-        for _cam in cams_selected:
-            train_views += [train_cams[_cam * FRAMES_EACH + i] for i in range(FRAMES_EACH)]
-        return train_views
+    # def update_traincams(cams_selected: List[int]) -> List[Camera]:
+    #     train_views = []
+    #     for _cam in cams_selected:
+    #         train_views += [train_cams[_cam * FRAMES_EACH + i] for i in range(FRAMES_EACH)]
+    #     return train_views
 
     batch_size = opt.batch_size
     timer.start()
-    train_views = update_traincams(_train_cams_selected)
+    # train_views = update_traincams(_train_cams_selected)
 
     # if "coarse" in stage:
     #     train_cams = [cam for cam in train_cams if cam.time == START_FRAME / FRAMES_EACH]
     #     print(f"Coarse using time={START_FRAME / FRAMES_EACH} cameras, total of {len(train_cams)} cameras")
+    if phase is not None:
+        print(f"[PHASE TRAINING], starting {phase = }")
+        train_cams = filter_cams(train_cams, phase)
+        # if phase != MAX_PHASE - 1:
+        final_iter = 50000 * phase
+        print(f"[PHASE TRAINING], num-of-cams: {len(train_cams)}")
+        if len(train_cams) == 0:
+            return
+
     n_train_views = len(train_cams)
     for iteration in range(first_iter, final_iter):        
 
@@ -159,9 +171,9 @@ def scene_reconstruction(
         # reshuffle after going through entire data once
         if (iteration % 1000 == 0 or iteration == first_iter) and RECUR:
             if RECUR_STATE:
-                get_state(train_cams, gaussians)
+                train_cams = get_state(train_cams, gaussians)
             if RECUR_HIDDEN:
-                get_hidden(train_cams, gaussians)
+                train_cams = get_hidden(train_cams, gaussians)
         
         # go through dataset sequentially for next <batch_size>
         query_idxs = np.random.choice(range(n_train_views), batch_size, replace=False)
@@ -220,7 +232,7 @@ def scene_reconstruction(
         #     lpipsloss = lpips_loss(image_tensor,gt_image_tensor,lpips_model)
         #     loss += opt.lambda_lpips * lpipsloss
         loss.backward()
-        # print(f"loss final = {loss}")
+        # print(f"loss final = {loss}, momentum: {total_momentum_reg}")
         viewspace_point_tensor_grad = torch.zeros_like(viewspace_point)
         for idx in range(batch_size):
             viewspace_point_tensor_grad += viewspace_point_tensor[idx].grad
@@ -253,18 +265,21 @@ def scene_reconstruction(
             # if dataset.render_process:
             if (iteration % EVAL_EVERY == EVAL_EVERY - 1) or (iteration == final_iter-1):
                 if RECUR_STATE:
-                    get_state(train_cams, gaussians)
-                    get_state(test_cams, gaussians)
-                    train_views = update_traincams(_train_cams_selected)
+                    train_cams = get_state(train_cams, gaussians)
+                    test_cams = get_state(test_cams, gaussians)
+                    # train_views = update_traincams(_train_cams_selected)
                 if RECUR_HIDDEN:
-                    get_hidden(train_cams, gaussians)
-                    get_hidden(test_cams, gaussians)
-                    train_views = update_traincams(_train_cams_selected)
+                    train_cams = get_hidden(train_cams, gaussians)
+                    test_cams = get_hidden(test_cams, gaussians)
+                    # train_views = update_traincams(_train_cams_selected)
                 avg_l1_test, avg_psnr_test = render_training_image(
                     scene, gaussians, test_cams, pipe, background, stage+"test",
                     iteration, timer.get_elapsed_time(), save_video, save_pointclound, save_images, use_wandb)
+                # avg_l1_train, avg_psnr_train = render_training_image(
+                #     scene, gaussians, train_views, pipe, background, stage+"train",
+                #     iteration, timer.get_elapsed_time(), save_video, save_pointclound, save_images, use_wandb)
                 avg_l1_train, avg_psnr_train = render_training_image(
-                    scene, gaussians, train_views, pipe, background, stage+"train",
+                    scene, gaussians, train_cams[:FRAMES_EACH * 3], pipe, background, stage+"train",
                     iteration, timer.get_elapsed_time(), save_video, save_pointclound, save_images, use_wandb)
                 if use_wandb:
                     infos = {
@@ -294,15 +309,15 @@ def scene_reconstruction(
                     opacity_threshold = opt.opacity_threshold_fine_init - iteration * (opt.opacity_threshold_fine_init - opt.opacity_threshold_fine_after) / opt.densify_until_iter
                     densify_threshold = opt.densify_grad_threshold_fine_init - iteration * (opt.densify_grad_threshold_fine_init - opt.densify_grad_threshold_after) / opt.densify_until_iter
                 
-                if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0 and gaussians.get_xyz.shape[0] < 8000:
+                if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0 and gaussians.get_xyz.shape[0] < 15000:
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
                     gaussians.densify(densify_threshold, opacity_threshold, scene.cameras_extent, size_threshold, 5, 5, scene.model_path, iteration, stage)
 
-                if iteration > opt.pruning_from_iter and iteration % opt.pruning_interval == 0 and gaussians.get_xyz.shape[0] > 4000:
+                if iteration > opt.pruning_from_iter and iteration % opt.pruning_interval == 0 and gaussians.get_xyz.shape[0] > 8000:
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
                     gaussians.prune(densify_threshold, opacity_threshold, scene.cameras_extent, size_threshold)
                     
-                if iteration % opt.densification_interval == 0 and gaussians.get_xyz.shape[0] < 8000 and opt.add_point:
+                if iteration % opt.densification_interval == 0 and gaussians.get_xyz.shape[0] < 15000 and opt.add_point:
                     gaussians.grow(5, 5, scene.model_path, iteration,stage)
 
                 if iteration % opt.opacity_reset_interval == 0:
@@ -314,7 +329,7 @@ def scene_reconstruction(
             gaussians.optimizer.step()
             gaussians.optimizer.zero_grad(set_to_none = True)
 
-def training(dataset, hyper, opt, pipe, checkpoint, expname, use_wandb, anchors):
+def training(dataset, hyper, opt, pipe, checkpoint, expname, use_wandb, anchors, phase):
     prepare_output_and_logger(args, expname)
     gaussians = GaussianModel(dataset.sh_degree, hyper)
     gaussians._deformation.recur = RECUR
@@ -327,19 +342,25 @@ def training(dataset, hyper, opt, pipe, checkpoint, expname, use_wandb, anchors)
     scene_reconstruction(
         dataset, opt, hyper, pipe, checkpoint, gaussians,
         scene, "coarse", timer,
-        use_wandb, save_video=True, save_images=False, save_pointclound=False,
+        use_wandb, save_video=True, save_images=False, save_pointclound=False, phase=None
     )
-    if anchors:
-        scene_reconstruction(
-            dataset, opt, hyper, pipe, checkpoint, gaussians,
-            scene, "anchor", timer,
-            use_wandb, save_video=True, save_images=False, save_pointclound=False,
-        )
-
+    # if anchors:
+    #     scene_reconstruction(
+    #         dataset, opt, hyper, pipe, checkpoint, gaussians,
+    #         scene, "anchor", timer,
+    #         use_wandb, save_video=True, save_images=False, save_pointclound=False, phase=None
+    #     )
+    if phase:
+        for i in range(MAX_PHASE):
+            scene_reconstruction(
+                dataset, opt, hyper, pipe, checkpoint, gaussians,
+                scene, "fine", timer,
+                use_wandb, save_video=True, save_images=False, save_pointclound=False, phase=i
+            )
     scene_reconstruction(
         dataset, opt, hyper, pipe, checkpoint, gaussians,
         scene, "fine", timer,
-        use_wandb, save_video=True, save_images=False, save_pointclound=False,
+        use_wandb, save_video=True, save_images=False, save_pointclound=False, phase=None
     )
 
 def prepare_output_and_logger(args, expname: str) -> None:
@@ -370,6 +391,7 @@ if __name__ == "__main__":
     parser.add_argument('--wandb', action='store_true', default=False)
     parser.add_argument("--quiet", action="store_true", default=False)
     parser.add_argument("--anchors", action="store_true", default=False)
+    parser.add_argument("--phases", action="store_true", default=False)
     parser.add_argument("--start_checkpoint", type=str, default = None)
     parser.add_argument("--expname", type=str, default = "")
     parser.add_argument("--configs", type=str, default = "")
@@ -408,7 +430,8 @@ if __name__ == "__main__":
         args.start_checkpoint,
         args.expname,
         args.wandb,
-        args.anchors
+        args.anchors,
+        args.phases
     )
 
     # All done

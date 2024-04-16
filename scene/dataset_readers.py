@@ -386,7 +386,7 @@ def readCamShortParallel(
     R = np.transpose(matrix[:3, :3])
     R[:, 0] = -R[:, 0]
     # force = force_process2(np.array(contents['force'])[3:])  #  directly drop positions here
-    force = np.array(contents['force'])[3:] # only keep xy rotations
+    force = np.array(contents['force'])[3:] / 100 # only keep xy rotations
     frames = contents["frames"]
     def read_fn(idx_frame) -> Camera:
         frame_step, frame = idx_frame

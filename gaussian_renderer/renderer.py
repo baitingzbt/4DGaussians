@@ -186,7 +186,7 @@ def render(
         ############# KNN rigid - nearby points have similar velo ###############
         # print((vel_dist>=0.2).sum(), vel_dist.max())
         # breakpoint()
-
+    # print(f"scales final: {scales_final}")
     scales_final = pc.scaling_activation(scales_final)
     rotations_final = pc.rotation_activation(rotations_final)
     opacity = pc.opacity_activation(opacity_final)

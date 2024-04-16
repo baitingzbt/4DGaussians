@@ -296,5 +296,22 @@ CUDA_VISIBLE_DEVICES=0 nohup python train.py \
     --configs arguments/dnerf/force_blend.py \
     --wandb > short_trajs2.out
 
+CUDA_VISIBLE_DEVICES=0 nohup python train.py \
+    --data_path_train data_new/scene3_60 \
+    --data_path_test data_new/scene3_60 \
+    --n_train_cams 540 \
+    --n_test_cams 25 \
+    --expname short_trajs_recur1 \
+    --configs arguments/dnerf/force_blend.py \
+    --wandb --detect_anomaly > short_trajs_recur1.out
+
+
+CUDA_VISIBLE_DEVICES=0 python train.py \
+    --data_path_train data_new/scene3_60 \
+    --data_path_test data_new/scene3_60 \
+    --n_train_cams 540 \
+    --n_test_cams 25 \
+    --expname short_trajs_recur1 \
+    --configs arguments/dnerf/force_blend.py
 # CUDA_VISIBLE_DEVICES=0 python train.py --data_drive ../ --data_path_train data_new/scene2_dir_train1 data_new/scene2_dir_train2 data_new/scene2_dir_train3 --data_path_test data_new/scene2_dir_test1 data_new/scene2_dir_test2 data_new/scene2_dir_test3 --n_train_cams 5 5 5 --n_test_cams 5 5 5 --expname test_read --configs arguments/dnerf/less_coarse.py
 # CUDA_VISIBLE_DEVICES=0 python train.py --data_drive /sdd/baiting/4DGaussians --data_path_train data_new/scene2_force1 --data_path_test data_new/scene2_force1 --n_train_cams 5 --n_test_cams 2 --expname scene2_test_forceplane --configs arguments/dnerf/less_coarse.py

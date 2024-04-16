@@ -101,11 +101,11 @@ class ModelHiddenParams(ParamGroup):
         self.no_ds=False
         self.no_dr=False
         self.no_do=True
-        self.no_dshs=True
+        self.no_dshs=False
         self.empty_voxel=False
         self.grid_pe=0
         self.static_mlp=False
-        self.apply_rotation=False
+        self.apply_rotation=True
         self.use_time = True # NOTE: Added by BZ
         self.use_force = False # NOTE: Added by BZ
         self.blend_time_force = False # NOTE: Added by BZ
