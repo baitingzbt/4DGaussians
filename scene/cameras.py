@@ -65,6 +65,7 @@ class Camera():
         FoVx,
         FoVy,
         image,
+        prev_frames,
         time = 0,
         frame_step = 0,
         force: np.ndarray = None,
@@ -79,10 +80,15 @@ class Camera():
         self.time = time
         self.frame_step = frame_step
         self.data_device = torch.device("cuda")
+        # 
         self.original_image = image.clamp(0.0, 1.0)[:3, :, :]
         self.image_width = self.original_image.shape[2]
         self.image_height = self.original_image.shape[1]
         self.original_image *= torch.ones((1, self.image_height, self.image_width))
+        # 
+        self.prev_frames = prev_frames.clamp(0.0, 1.0) # .cuda()
+        # self.prev_frames *= torch.ones((1, self.image_height, self.image_width))
+        
         self.mask = None
         self.force = force
         self.full_force = full_force
@@ -92,5 +98,5 @@ class Camera():
         self.full_proj_transform = (self.world_view_transform.unsqueeze(0).bmm(projection_matrix.unsqueeze(0))).squeeze(0)
         self.camera_center = self.world_view_transform.inverse()[3, :3]
         self.pos_idx = pos_idx
-        self.prev_state = pos_idx # means3D
+        self.prev_state = None # means3D
         self.prev_hidden = None # hexplane - features

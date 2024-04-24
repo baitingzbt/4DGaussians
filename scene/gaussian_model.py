@@ -194,7 +194,7 @@ class GaussianModel:
             {'params': [self._rotation], 'lr': training_args.rotation_lr, "name": "rotation"}
         ]
 
-        self.optimizer = torch.optim.AdamW(l, lr=0.0, eps=1e-8)
+        self.optimizer = torch.optim.AdamW(l, lr=0.0001, eps=1e-8)
         # self.optimizer = torch.optim.Adam(l, lr=0.0, eps=1e-15)
         self.xyz_scheduler_args = get_expon_lr_func(
             lr_init=training_args.position_lr_init*self.spatial_lr_scale,
@@ -575,7 +575,7 @@ class GaussianModel:
             big_points_vs = self.max_radii2D > max_screen_size
             big_points_ws = self.get_scaling.max(dim=1).values > 0.1 * extent
             prune_mask = torch.logical_or(prune_mask, big_points_vs)
-            prune_mask = torch.logical_or(torch.logical_or(prune_mask, big_points_vs), big_points_ws)
+            prune_mask = torch.logical_or(prune_mask, big_points_ws)
         self.prune_points(prune_mask)
         torch.cuda.empty_cache()
     

@@ -119,6 +119,7 @@ def interpolate_ms_features(
             # NOTE: if the grid[ci] of <coo_combs> actually matters, interp_out_plane should change more?
             # this means
             interp_space = interp_space * interp_out_plane
+            # print(interp_space.mean().item())
         # combine over scales
         if concat_features:
             multi_scale_interp.append(interp_space)
@@ -211,6 +212,7 @@ class HexPlaneField(nn.Module):
         if force is not None:
             pts = torch.cat((pts, force), dim=-1)
         pts = pts.reshape(-1, pts.shape[-1])
+        
         features = interpolate_ms_features(
             pts,
             ms_grids=self.grids,  # noqa
@@ -223,6 +225,11 @@ class HexPlaneField(nn.Module):
         if len(features) < 1:
             features = torch.zeros((0, 1)).to(features.device)
         return features
+
+    # NOTE: using MLP can help to increase the influence of the time/force-related inputs
+    # as in Hexplane, we have to mostly put it as (x, y, z, t, (f)) but now
+    def get_features_mlp(self):
+        pass
 
     def forward(
         self,

@@ -15,10 +15,10 @@ if USE_FORCE and not BLEND_TIME_FORCE:
     INPUT_DIM += 1 # 4
 
 OptimizationParams = dict(
-    coarse_iterations = 5000, # 10000, # default: 3000
+    coarse_iterations = 3000, # 10000, # default: 3000
     anchor_iterations = 0,
     densify_until_iter = 100000,
-    iterations = 5000000,
+    iterations = 40000,
     batch_size = 8
 )
 
@@ -43,7 +43,13 @@ ModelHiddenParams = dict(
     time_smoothness_weight = 0.01, # default: 0.01
     l1_time_planes = 0., # 0001, # default: 0.0001
     l2_time_planes = 0.0005, # 0005,
-    multires = [1, 2]
+    multires = [1, 2],
+    no_dx=False,
+    no_grid=False,
+    no_ds=False,
+    no_dr=False,
+    no_do=True,
+    no_dshs=False,
 )
 
 

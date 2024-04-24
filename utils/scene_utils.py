@@ -7,7 +7,7 @@ import numpy as np
 from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
 from scene.gaussian_model import GaussianModel
 from scene.cameras import Camera
-from gaussian_renderer.renderer import render
+from gaussian_renderer.renderer import render_for_image
 from scene import Scene
 import wandb
 from typing import List, Union, Tuple, Dict
@@ -39,7 +39,7 @@ def render_training_image(
     times = round(time_now / 60, 2)
     label2 = f"time: {times} mins"
     def render_helper(viewpoint: Camera) -> Tuple[np.ndarray, float, float]:
-        image = render(viewpoint, gaussians, pipe, background, stage=stage, training=False)[0]
+        image = render_for_image(viewpoint, gaussians, pipe, background, stage=stage)
         gt_np = viewpoint.original_image.permute(1, 2, 0).detach().cpu().numpy()
         image_np = image.permute(1, 2, 0).detach().cpu().numpy()  # 转换通道顺序为 (H, W, 3)
         # all_test_loss.append(np.mean(np.square(gt_np - image_np)))
@@ -84,7 +84,7 @@ def render_training_image(
     #     all_psnr.append(psnr)
 
     # breakpoint()
-    with ThreadPool(100) as pool:
+    with ThreadPool(10) as pool:
         all_renders_infos: List = pool.map(
             render_helper,
             viewpoints

@@ -372,6 +372,29 @@ def force_process2(force: np.ndarray) -> float:
     # print(f"{math.degrees(force[1])}, {math.degrees(force[0])} -> {theta_degrees = }")
     return theta_degrees
 
+def get_image_tensor(path: str, width = 480, height = 480) -> torch.TensorType:
+    image = Image.open(path).resize((width, height))
+    norm_data = np.array(image.convert("RGBA"), dtype=np.float32) / 255.0
+    # assume white_background = True
+    arr = norm_data[:, :, :3] * norm_data[:, :, 3:4] + (1 - norm_data[:, :, 3:4])
+    return torch.tensor(arr, dtype=torch.float32).permute(2, 0, 1)
+
+def get_prev_images(path: str, prev: int = 4, width = 480, height = 480) -> torch.TensorType:
+    infos = path.split('_')
+    cur_step = infos[-1] # xxx.png
+    cur_step = int(cur_step.split('.')[0])
+    start_step = max(0, cur_step - prev)
+    out_tensor = torch.zeros((prev, 3, width, height))
+    for i, _s in enumerate(range(start_step, cur_step)):
+        new_path = "_".join(infos[:-1] + [f'{_s:03}.png'])
+        assert os.path.exists(new_path)
+        img = get_image_tensor(new_path, width, height)
+        # if prev > cur_step, skip the differences in output dimension
+        _i = i + max(0, prev - cur_step)
+        out_tensor[_i] = img
+    return out_tensor
+    
+
 # use with cautious, lots of special case and magic numbers to maximize reading speed
 def readCamShortParallel(
     path: str,
@@ -386,22 +409,25 @@ def readCamShortParallel(
     R = np.transpose(matrix[:3, :3])
     R[:, 0] = -R[:, 0]
     # force = force_process2(np.array(contents['force'])[3:])  #  directly drop positions here
-    force = np.array(contents['force'])[3:] / 100 # only keep xy rotations
+    force = np.array(contents['force'])[3:5] # / 100 # only keep xy rotations
+    # if abs(np.degrees(force[0])) <= 45.1:
+    #     return []
     frames = contents["frames"]
     def read_fn(idx_frame) -> Camera:
         frame_step, frame = idx_frame
+        # print(f"{frame_step = }")
         if frame_step >= MAX_FRAME or frame_step < START_FRAME:
             return None
-        image = Image.open(f"{path}/{frame['file_path']}").resize((480, 480))
-        norm_data = np.array(image.convert("RGBA"), dtype=np.float32) / 255.0
-        # assume white_background = True
-        arr = norm_data[:, :, :3] * norm_data[:, :, 3:4] + (1 - norm_data[:, :, 3:4])
+        _path = f"{path}/{frame['file_path']}"
+        arr = get_image_tensor(_path)
+        prev_arr = get_prev_images(_path)
         cam = Camera(
             R=R,
             T=matrix[:3, 3],
             FoVx=contents['camera_angle_x'], # assume H and W are the same to save compute
             FoVy=contents['camera_angle_x'], # assume H and W are the same to save compute
-            image=torch.tensor(arr, dtype=torch.float32).permute(2, 0, 1),
+            image=arr,
+            prev_frames=prev_arr,
             time=mapper[frame["time"]],
             frame_step=frame_step,
             force=force,

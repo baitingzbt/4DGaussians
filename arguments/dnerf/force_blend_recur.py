@@ -15,11 +15,24 @@ if USE_FORCE and not BLEND_TIME_FORCE:
     INPUT_DIM += 1 # 4
 
 OptimizationParams = dict(
-    coarse_iterations = 3000, # 10000, # default: 3000
+    coarse_iterations = 6000, # 10000, # default: 3000
     anchor_iterations = 0,
     densify_until_iter = 15000,
     iterations = 5000000,
     batch_size = 8,
+    position_lr_init = 0.00016 / 10,
+    position_lr_final = 0.0000016 / 10,
+    position_lr_delay_mult = 0.01,
+    position_lr_max_steps = 20_000,
+    deformation_lr_init = 0.00016 / 10,
+    deformation_lr_final = 0.000016 / 10,
+    deformation_lr_delay_mult = 0.01,
+    grid_lr_init = 0.0016 / 10,
+    grid_lr_final = 0.00016 / 10,
+    feature_lr = 0.0025 / 10,
+    opacity_lr = 0.05 / 10,
+    scaling_lr = 0.005 / 10,
+    rotation_lr = 0.001 / 10,
 )
 
 ModelParams = dict(
@@ -47,10 +60,10 @@ ModelHiddenParams = dict(
     multires = [1, 2],
     no_dx=False,
     no_grid=False,
-    no_ds=False,
+    no_ds=True,
     no_dr=False,
     no_do=True,
-    no_dshs=False,
+    no_dshs=True,
 )
 
 
