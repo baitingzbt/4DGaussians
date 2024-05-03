@@ -13,7 +13,7 @@ import os
 import sys
 from PIL import Image
 from scene.cameras import Camera
-from typing import List, Set, Any, Optional, Dict, NamedTuple
+from typing import List, Set, Any, Optional, Dict, NamedTuple, Tuple
 from multiprocessing.pool import ThreadPool
 from utils.graphics_utils import getWorld2View2, focal2fov, fov2focal
 import numpy as np
@@ -25,8 +25,9 @@ from utils.sh_utils import SH2RGB
 from scene.gaussian_model import BasicPointCloud
 from utils.general_utils import PILtoTorch
 from tqdm import tqdm
-MAX_FRAME = 8
-START_FRAME = 1 # 0: use all frames, otherwise drops first n frames
+import re
+MAX_FRAME = 40
+START_FRAME = 0 # 0: use all frames, otherwise drops first n frames
 
 class CameraInfo(NamedTuple):
     uid: int
@@ -351,11 +352,6 @@ def force_process(force: np.ndarray) -> float:
     # print(f"force in: {force}")
     if theta_radians < 0:
         theta_radians += 2 * math.pi
-    # print(f"degrees:", math.degrees(force[1]), math.degrees(force[0]), theta_radians)
-    # print(f"theta_deg:", theta_degrees)
-    # new_force = np.zeros(2)
-    # new_force[0] = theta_radians
-    # new_force[2] = force[-1]
     return theta_radians
 
 def force_process2(force: np.ndarray) -> float:
@@ -372,27 +368,40 @@ def force_process2(force: np.ndarray) -> float:
     # print(f"{math.degrees(force[1])}, {math.degrees(force[0])} -> {theta_degrees = }")
     return theta_degrees
 
-def get_image_tensor(path: str, width = 480, height = 480) -> torch.TensorType:
-    image = Image.open(path).resize((width, height))
-    norm_data = np.array(image.convert("RGBA"), dtype=np.float32) / 255.0
+def get_image_tensor(
+    rgb_path: str, depth_path: str = None, seg_path: str = None,
+    width = 480, height = 480
+) -> Tuple[torch.TensorType, torch.TensorType, torch.TensorType]:
+    rgb_image = Image.open(rgb_path).resize((width, height))
+    norm_data = np.array(rgb_image.convert("RGBA"), dtype=np.float32) / 255.0
     # assume white_background = True
     arr = norm_data[:, :, :3] * norm_data[:, :, 3:4] + (1 - norm_data[:, :, 3:4])
-    return torch.tensor(arr, dtype=torch.float32).permute(2, 0, 1)
+    rgb = torch.tensor(arr, dtype=torch.float32).permute(2, 0, 1)
+    dep = None if depth_path is None \
+        else torch.tensor(np.array(Image.open(depth_path).resize((width, height)), dtype=np.float32) / 255.0)
+    seg = None if seg_path is None \
+        else torch.tensor(np.array(Image.open(seg_path).resize((width, height)), dtype=np.float32) / 255.0).permute(2, 0, 1)
+    # seg=1 means background or floor, this means we change everything except the block to white-background
+    # if seg is not None:
+    #     rgb[seg == 1] = 1
+    return rgb, dep, seg
 
 def get_prev_images(path: str, prev: int = 4, width = 480, height = 480) -> torch.TensorType:
+    if prev <= 0:
+        return None
     infos = path.split('_')
     cur_step = infos[-1] # xxx.png
     cur_step = int(cur_step.split('.')[0])
     start_step = max(0, cur_step - prev)
-    out_tensor = torch.zeros((prev, 3, width, height))
+    prev_imgs = torch.zeros((prev, 3, width, height))
     for i, _s in enumerate(range(start_step, cur_step)):
         new_path = "_".join(infos[:-1] + [f'{_s:03}.png'])
         assert os.path.exists(new_path)
-        img = get_image_tensor(new_path, width, height)
+        img = get_image_tensor(new_path, width=width, height=height)[0]
         # if prev > cur_step, skip the differences in output dimension
         _i = i + max(0, prev - cur_step)
-        out_tensor[_i] = img
-    return out_tensor
+        prev_imgs[_i] = img
+    return prev_imgs
     
 
 # use with cautious, lots of special case and magic numbers to maximize reading speed
@@ -400,7 +409,8 @@ def readCamShortParallel(
     path: str,
     mapper: Dict,
     force_idx: int,
-    pos_idx: int
+    pos_idx: int,
+    prev_frames: int = 0,
 ) -> List[Camera]:
     cams: List[Camera] = []
     with open(f"{path}/transforms_short.json") as json_file:
@@ -408,37 +418,44 @@ def readCamShortParallel(
     matrix = -np.linalg.inv(np.array(contents["transform_matrix"]))
     R = np.transpose(matrix[:3, :3])
     R[:, 0] = -R[:, 0]
-    # force = force_process2(np.array(contents['force'])[3:])  #  directly drop positions here
+    # force = force_process2(np.array(contents['force'])[3:5]) * 10  #  directly drop positions here
     force = np.array(contents['force'])[3:5] # / 100 # only keep xy rotations
     # if abs(np.degrees(force[0])) <= 45.1:
     #     return []
-    frames = contents["frames"]
+    # force = force_process(force)
     def read_fn(idx_frame) -> Camera:
         frame_step, frame = idx_frame
         # print(f"{frame_step = }")
         if frame_step >= MAX_FRAME or frame_step < START_FRAME:
             return None
-        _path = f"{path}/{frame['file_path']}"
-        arr = get_image_tensor(_path)
-        prev_arr = get_prev_images(_path)
+        rgb_path = f"{path}/{frame['file_path']}"
+        dep_path = re.sub(r'(r_)(\d+)(\.png)$', r'd_\2\3', rgb_path)
+        seg_path = re.sub(r'(r_)(\d+)(\.png)$', r's_\2\3', rgb_path)
+        dep_path = dep_path if os.path.isfile(dep_path) else None
+        seg_path = seg_path if os.path.isfile(seg_path) else None
+        rgb, dep, seg = get_image_tensor(rgb_path, dep_path, seg_path)
+        prev_arr = get_prev_images(rgb_path, prev=prev_frames)
+        # print(f"{frame_step = } | time = {mapper[frame['time']]}")
         cam = Camera(
             R=R,
             T=matrix[:3, 3],
             FoVx=contents['camera_angle_x'], # assume H and W are the same to save compute
             FoVy=contents['camera_angle_x'], # assume H and W are the same to save compute
-            image=arr,
+            image=rgb,
+            depth=dep,
+            mask=seg,
             prev_frames=prev_arr,
             time=mapper[frame["time"]],
             frame_step=frame_step,
             force=force,
-            full_force=np.array(contents['force'])[3:5],
+            full_force=[np.rint(np.degrees(np.array(contents['force'])[3])), np.rint(np.degrees(np.array(contents['force'])[4]))],
             force_idx=force_idx,
             pos_idx=pos_idx
         )
         return cam
 
     with ThreadPool(10) as pool:
-        cams = pool.map(read_fn, enumerate(frames))
+        cams = pool.map(read_fn, enumerate(contents["frames"]))
     return [cam for cam in cams if cam is not None]
 
 def read_force_timeline(paths_train: List[str], paths_test: List[str]):
@@ -504,7 +521,8 @@ def readForceSyntheticInfo2(
     paths_train: List[str],
     paths_test: List[str],
     n_train_cams: List[int],
-    n_test_cams: List[int]
+    n_test_cams: List[int],
+    prev_frames: int = 0
 ):
     paths = paths_train + paths_test
     timestamp_mapper, maxtime = read_force_timeline(paths_train, paths_test)
@@ -512,12 +530,12 @@ def readForceSyntheticInfo2(
     def helper_train(args) -> List[Camera]:
         path, i, force_idx = args
         cam_path = os.path.join(f"{path}/train", os.listdir(f"{path}/train")[i])
-        return readCamShortParallel(cam_path, timestamp_mapper, force_idx, i)
+        return readCamShortParallel(cam_path, timestamp_mapper, force_idx, i, prev_frames)
     
     def helper_test(args) -> List[Camera]:
         path, i, force_idx = args
         cam_path = os.path.join(f"{path}/test", os.listdir(f"{path}/test")[i])
-        return readCamShortParallel(cam_path, timestamp_mapper, force_idx, i)
+        return readCamShortParallel(cam_path, timestamp_mapper, force_idx, i, prev_frames)
 
     import time
     time_start = time.time()

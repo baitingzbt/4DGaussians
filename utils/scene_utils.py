@@ -7,14 +7,14 @@ import numpy as np
 from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
 from scene.gaussian_model import GaussianModel
 from scene.cameras import Camera
-from gaussian_renderer.renderer import render_for_image
+from gaussian_renderer.renderer import render_for_image, render
 from scene import Scene
 import wandb
 from typing import List, Union, Tuple, Dict
 from .image_utils import psnr_np
 from multiprocessing.pool import ThreadPool
 from tqdm import tqdm
-
+from scene.dataset_readers import START_FRAME, MAX_FRAME
 FONT = ImageFont.truetype('./utils/TIMES.TTF', size=40) # 选择字体和字体大小
 TXT_COLOR = (255, 0, 0)  # 白色
 LABEL1_POS = (10, 10) # 选择标签的位置（左上角坐标
@@ -28,41 +28,34 @@ def render_training_image(
     background,
     stage: str,
     iteration: int,
-    time_now,
+    time_now: float,
     save_video: bool = True,
     save_pointclound: bool = False,
-    save_images: bool = False,
     use_wandb: bool = False
 ) -> Tuple[float, float]:
     gaussians._deformation.eval()
     gaussians._deformation.deformation_net.eval()
     times = round(time_now / 60, 2)
     label2 = f"time: {times} mins"
-    def render_helper(viewpoint: Camera) -> Tuple[np.ndarray, float, float]:
+    def render_helper(i, viewpoint: Camera) -> Tuple[np.ndarray, float, float]:
+        # if viewpoint.frame_step in [START_FRAME, MAX_FRAME-1]:
+        #     return None, None, None
         image = render_for_image(viewpoint, gaussians, pipe, background, stage=stage)
+        # image = render(
+        #     [viewpoints[i-1], viewpoints[i], viewpoints[i+1]],
+        #     gaussians, pipe, background, stage=stage
+        # )[0]
         gt_np = viewpoint.original_image.permute(1, 2, 0).detach().cpu().numpy()
         image_np = image.permute(1, 2, 0).detach().cpu().numpy()  # 转换通道顺序为 (H, W, 3)
-        # all_test_loss.append(np.mean(np.square(gt_np - image_np)))
-        # all_psnr.append(psnr_np(image_np, gt_np))
         loss = np.square(gt_np - image_np).mean()
         psnr = psnr_np(image_np, gt_np)
-        # if isinstance(viewpoint.force, float) or viewpoint.force.shape[0] < 2:
-        force_label = viewpoint.full_force
-        # else:
-        #     force_label = np.ones_like(viewpoint.full_force)
-        #     force_label[0] = np.degrees(viewpoint.full_force[0])
-        #     force_label[1] = np.degrees(viewpoint.full_force[1])
-        #     if viewpoint.force.shape[0] == 3:
-        #         force_label[2] = viewpoint.force[2]
-        label1 = f"stage:{stage},iter:{iteration}\nframe_t:{round(viewpoint.time, 2)}\nforce:{force_label}"
+        label1 = f"stage:{stage},iter:{iteration}\nframe_t:{round(viewpoint.time, 2)}\nforce:{viewpoint.full_force}"
         image_np = np.concatenate((gt_np, image_np), axis=1)
         image_with_labels = Image.fromarray((np.clip(image_np, 0, 1) * 255).astype('uint8'))  # 转换为8位图像
         draw1 = ImageDraw.Draw(image_with_labels)
         label2_position = (image_with_labels.width - 100 - len(label2) * 10, 10)  # 右上角坐标
         draw1.text(LABEL1_POS, label1, fill=TXT_COLOR, font=FONT)
         draw1.text(label2_position, label2, fill=TXT_COLOR, font=FONT)
-        # if save_images:
-        #     image_with_labels.save(path)
         image_with_label_arr = np.array(image_with_labels)
         return image_with_label_arr, loss, psnr
     
@@ -73,29 +66,32 @@ def render_training_image(
     os.makedirs(point_cloud_path, exist_ok=True)
     os.makedirs(image_path, exist_ok=True)
     # image: (3, 800, 800)
-    # all_renders = []
-    # all_psnr = []
-    # all_test_loss = []
-    # for viewpoint in tqdm(viewpoints):
-    #     # image_save_path = os.path.join(image_path, f"{iteration}_{idx}.png") if save_images else None
-    #     img, loss, psnr = render_helper(viewpoint)
-    #     all_renders.append(img)
-    #     all_test_loss.append(loss)
-    #     all_psnr.append(psnr)
-
-    # breakpoint()
-    with ThreadPool(10) as pool:
-        all_renders_infos: List = pool.map(
-            render_helper,
-            viewpoints
-        )
     all_renders = []
     all_psnr = []
     all_test_loss = []
-    for img, loss, psnr in all_renders_infos:
-        all_renders.append(img)
-        all_test_loss.append(loss)
-        all_psnr.append(psnr)
+    for i, viewpoint in tqdm(enumerate(viewpoints), total=len(viewpoints)):
+        # if viewpoint.frame_step in [0, 9]:
+        #     continue
+        img, loss, psnr = render_helper(i, viewpoint)
+        if img is not None:
+            all_renders.append(img)
+            all_test_loss.append(loss)
+            all_psnr.append(psnr)
+
+    # breakpoint()
+    # with ThreadPool() as pool:
+    #     all_renders_infos: List = pool.map(
+    #         render_helper,
+    #         viewpoints
+    #     )
+    # all_renders = []
+    # all_psnr = []
+    # all_test_loss = []
+    # for img, loss, psnr in all_renders_infos:
+    #     if img and loss and psnr: # not One
+    #         all_renders.append(img)
+    #         all_test_loss.append(loss)
+    #         all_psnr.append(psnr)
 
     avg_psnr = np.round(np.mean(np.array(all_psnr)), 2)
     avg_l1 = np.mean(np.array(all_test_loss))

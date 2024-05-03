@@ -40,7 +40,7 @@ class Scene:
         # )
         scene_info = readForceSyntheticInfo2(
             args.data_path_train, args.data_path_test,
-            args.n_train_cams, args.n_test_cams
+            args.n_train_cams, args.n_test_cams, args.prev_frames
         )
         self.maxtime = scene_info.maxtime
         self.dataset_type = "blender"

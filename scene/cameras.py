@@ -65,6 +65,8 @@ class Camera():
         FoVx,
         FoVy,
         image,
+        depth,
+        mask,
         prev_frames,
         time = 0,
         frame_step = 0,
@@ -84,12 +86,12 @@ class Camera():
         self.original_image = image.clamp(0.0, 1.0)[:3, :, :]
         self.image_width = self.original_image.shape[2]
         self.image_height = self.original_image.shape[1]
-        self.original_image *= torch.ones((1, self.image_height, self.image_width))
-        # 
-        self.prev_frames = prev_frames.clamp(0.0, 1.0) # .cuda()
-        # self.prev_frames *= torch.ones((1, self.image_height, self.image_width))
-        
-        self.mask = None
+        self.depth = depth
+        self.prev_frames = None if prev_frames is None else prev_frames.clamp(0.0, 1.0)
+        ''' start, for idx0based prev frame '''
+        # self.prev_frames = torch.ones_like(self.prev_frames) * pos_idx / 720
+        ''' end, 720 is a magic number '''
+        self.mask = None if mask is None else mask[0]
         self.force = force
         self.full_force = full_force
         self.force_idx = force_idx
@@ -99,4 +101,3 @@ class Camera():
         self.camera_center = self.world_view_transform.inverse()[3, :3]
         self.pos_idx = pos_idx
         self.prev_state = None # means3D
-        self.prev_hidden = None # hexplane - features

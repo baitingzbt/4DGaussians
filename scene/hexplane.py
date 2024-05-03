@@ -85,9 +85,12 @@ def init_grid_param(
         )
         # x, y, z, time, force;
         # below means if time or force exist in current coo_comb, initialize those planes to 1
-        # if max(coo_comb) >= 3:
+
+        # this is saying, if blend force+time, then don't init anything as ones_
+        # but if not blending force and time, we init the ones related to time (xt, yt, zt) as ones_
+        # and keep the (xf, yf, zf) still as uniform_
+        # if max(coo_comb) == 3 and has_force_planes and has_time_planes:
         #     nn.init.ones_(new_grid_coef)
-        # else:
         nn.init.uniform_(new_grid_coef, a=a, b=b)
         grid_coefs.append(new_grid_coef)
 
@@ -180,15 +183,6 @@ class HexPlaneField(nn.Module):
             nn.ReLU(),
             nn.Linear(self.recur_feat_dim, self.feat_dim)
         )
-            
-        # [x_prev, y_prev, z_prev, x, y, z] -> [hidden1, hidden2, hidden3]
-        # self.pts_embedder = nn.Sequential(
-        #     nn.Linear(6, 6),
-        #     nn.ReLU(),
-        #     nn.Linear(6, 6),
-        #     nn.ReLU(),
-        #     nn.Linear(6, 3)
-        # )
 
     @property
     def get_aabb(self):
@@ -202,8 +196,7 @@ class HexPlaneField(nn.Module):
         self,
         pts: torch.Tensor,
         time: Optional[torch.Tensor] = None,
-        force: Optional[torch.Tensor] = None,
-        hidden: Optional[torch.Tensor] = None
+        force: Optional[torch.Tensor] = None
     ):
         """Computes and returns the densities."""
         pts = normalize_aabb(pts, self.aabb)
@@ -220,8 +213,6 @@ class HexPlaneField(nn.Module):
             concat_features=self.concat_features
         )
         
-        if hidden is not None:
-            features = self.feature_aggr.forward(torch.cat((features, hidden), dim=1))
         if len(features) < 1:
             features = torch.zeros((0, 1)).to(features.device)
         return features
@@ -235,7 +226,6 @@ class HexPlaneField(nn.Module):
         self,
         pts: torch.Tensor,
         time: Optional[torch.Tensor] = None,
-        force: Optional[torch.Tensor] = None,
-        hidden: Optional[torch.Tensor] = None,
+        force: Optional[torch.Tensor] = None
     ):
-        return self.get_density(pts, time, force, hidden)
+        return self.get_density(pts, time, force)

@@ -35,8 +35,8 @@ class GaussianModel:
             actual_covariance = L @ L.transpose(1, 2)
             symm = strip_symmetric(actual_covariance)
             return symm
-        self.scaling_activation = lambda x: torch.exp(x / 10)  # torch.exp
-        self.scaling_inverse_activation = lambda x: torch.log(x) * 10  # torch.log
+        self.scaling_activation = torch.exp # lambda x: torch.exp(x / 10)  # torch.exp # 
+        self.scaling_inverse_activation = torch.log # lambda x: torch.log(x) * 10  # torch.log #
         self.covariance_activation = build_covariance_from_scaling_rotation
         self.opacity_activation = torch.sigmoid
         self.inverse_opacity_activation = inverse_sigmoid
@@ -79,7 +79,6 @@ class GaussianModel:
             self._xyz,
             self._deformation.state_dict(),
             self._deformation_table,
-            # self.grid,
             self._features_dc,
             self._features_rest,
             self._scaling,
@@ -97,8 +96,6 @@ class GaussianModel:
         self._xyz, 
         deform_state,
         self._deformation_table,
-        
-        # self.grid,
         self._features_dc, 
         self._features_rest,
         self._scaling, 
@@ -472,6 +469,8 @@ class GaussianModel:
         # selected_pts_mask_grow = torch.logical_and(global_mask, grads_accum_mask)
         # print("降采样点云:",sparse_point_mask.sum(),"选中的稀疏点云：",global_mask.sum(),"梯度累计点云：",grads_accum_mask.sum(),"选中增长点云：",selected_pts_mask_grow.sum())
         # Extract points that satisfy the gradient condition
+
+        # True: grad too large, or scale too small
         selected_pts_mask = torch.logical_and(grads_accum_mask,
                                               torch.max(self.get_scaling, dim=1).values <= self.percent_dense*scene_extent)
         new_xyz = self._xyz[selected_pts_mask] 

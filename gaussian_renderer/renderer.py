@@ -20,6 +20,7 @@ from copy import deepcopy
 from utils.general_utils import knn
 from scene.dataset_readers import START_FRAME, MAX_FRAME
 from typing import List
+from collections import defaultdict
 
 # ANCHORS = np.array([
 #     0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1.0
@@ -56,9 +57,8 @@ def render_for_state(
         scales = pc._scaling
         rotations = pc._rotation
         means3D = pc.get_xyz
-        
-    means3D_final, scales_final, rotations_final, opacity_final, shs_final, _ = pc._deformation.forward_dynamic(
-        means3D, scales, rotations, opacity, shs, time, force, cam.prev_hidden
+    means3D_final, scales_final, rotations_final, opacity_final, shs_final = pc._deformation.forward_dynamic(
+        means3D, scales, rotations, opacity, shs, time, force, cam.prev_frames
     )
 
     state = {
@@ -70,37 +70,18 @@ def render_for_state(
     }
     return state
 
-def render_for_hidden(
-    cam: Camera,
-    pc: GaussianModel,
-):
-    # Set up rasterization configuration
-    time = torch.tensor(cam.time).to(dtype=torch.float32, device=pc.get_xyz.device).repeat(pc.get_xyz.shape[0], 1)
-    force = torch.tensor(cam.force).to(dtype=torch.float32, device=pc.get_xyz.device).repeat(pc.get_xyz.shape[0], 1)
-    opacity = pc._opacity
-    shs = pc.get_features
-    scales = pc._scaling
-    rotations = pc._rotation
-    means3D = pc.get_xyz
-    hidden = cam.prev_hidden
-    # return the new hidden
-    return pc._deformation.forward_dynamic(means3D, scales, rotations, opacity, shs, time, force, hidden)[-1].detach()
-
 def render(
     viewpoint_cameras: List[Camera],
     pc: GaussianModel,
     pipe,
     bg_color: torch.Tensor,
     scaling_modifier = 1.0,
-    override_color = None,
     stage="fine"
 ):
     # Create zero tensor. We will use it to make pytorch return gradients of the 2D (screen-space) means
-    screenspace_points = torch.zeros_like(pc.get_xyz, dtype=pc.get_xyz.dtype, requires_grad=True, device="cuda") + 0
-    try:
-        screenspace_points.retain_grad()
-    except:
-        pass
+    screenspace_points = torch.zeros_like(pc.get_xyz, dtype=pc.get_xyz.dtype, requires_grad=True, device="cuda")
+    # if not ('train' in stage or 'test' in stage):
+    screenspace_points.retain_grad()
 
     # Set up rasterization configuration
     viewpoint_camera = viewpoint_cameras[1]
@@ -130,7 +111,6 @@ def render(
     scales = pc._scaling
     rotations = pc._rotation
     means3D = pc.get_xyz
-    hidden = None
     if "coarse" in stage:
         means3D_final, scales_final, rotations_final, opacity_final, shs_final \
             = means3D, scales, rotations, opacity, shs
@@ -140,96 +120,87 @@ def render(
         if "anchor" in stage:
             _time = cast_time_to_anchor(_time)
         time = torch.tensor(_time).to(dtype=torch.float32, device=device).repeat(n_points, 1)
-        time_prev = torch.ones_like(time) * (_time - 1 / (MAX_FRAME - START_FRAME))
-        time_nxt = torch.ones_like(time) * (_time + 1 / (MAX_FRAME - START_FRAME))
+        time_prev = torch.ones_like(time) * (_time - 1 / (MAX_FRAME - 1))
+        time_nxt = torch.ones_like(time) * (_time + 1 / (MAX_FRAME - 1))
         force = torch.tensor(_force).to(dtype=torch.float32, device=device).repeat(n_points, 1)
-        if viewpoint_camera.prev_state is not None and pc._deformation.recur_state:
+        if viewpoint_camera.prev_state is not None and pc._deformation.recur:
             means3D = viewpoint_camera.prev_state['means3D']  # (n_pts, 3)
             opacity = viewpoint_camera.prev_state['opacity']  # (n_pts, 3)
             shs = viewpoint_camera.prev_state['shs']  # (n_pts, 4)
             scales = viewpoint_camera.prev_state['scales']  # (n_pts, 3)
             rotations = viewpoint_camera.prev_state['rotations']  # (n_pts, 4)
-        if viewpoint_camera.prev_hidden is not None and pc._deformation.recur_hidden:
-            hidden = viewpoint_camera.prev_hidden.detach()
         prev_frames = viewpoint_camera.prev_frames
-        means3D_final, scales_final, rotations_final, opacity_final, shs_final, _ \
-            = pc._deformation.forward_dynamic(means3D, scales, rotations, opacity, shs, time, force, hidden, prev_frames)
-    if means3D_final.abs().max().detach().item() > 100:
-        print(f"num of irregular pts: {(means3D_final.abs() > 100).sum()}")
+        means3D_final, scales_final, rotations_final, opacity_final, shs_final \
+            = pc._deformation.forward_dynamic(means3D, scales, rotations, opacity, shs, time, force, prev_frames)
+    scales_final = pc.scaling_activation(scales_final)
+    rotations_final = pc.rotation_activation(rotations_final)
+    opacity_final = pc.opacity_activation(opacity_final)
+    # if means3D_final.abs().max().detach().item() > 100:
+    #     print(f"num of irregular pts: {(means3D_final.abs() > 100).sum()}")
     
-    # recursion doesn't use momentum loss
+    reg_dict = defaultdict(lambda: torch.tensor(0))
     if ("coarse" in stage) or ("anchor" in stage):
-        momentum_reg = torch.tensor(0.0)
-        opacity_reg = torch.tensor(0.0)
-        knn_reg = torch.tensor(0.0)
+        pass
     elif pc._deformation.recur:
-        momentum_reg = torch.tensor(0.0)
-        opacity_reg = torch.tensor(0.0)
         velocity = means3D_final - means3D
         k = 10
-        idx, dist = knn(
-            means3D_final[None].contiguous().detach(), 
-            means3D_final[None].contiguous().detach(), 
-            k
-        )
+        idx, dist = knn(means3D_final[None].contiguous().detach(), means3D_final[None].contiguous().detach(), k)
         vel_dist = torch.norm(velocity[idx] - velocity[None, :, None], p=2, dim=-1)
-        weight = torch.exp(-100 * dist) # * (vel_dist < 0.25).float()
-        knn_reg = (weight * vel_dist).sum() / k / means3D_final.shape[0]
+        weight = torch.exp(-100 * dist) # * (vel_dist < 0.25).float()  |  farther the 3d distance, lower the impact?
+        reg_dict['knn'] = (weight * vel_dist).sum() / k / n_points
     else:
         prev_frames_prev = viewpoint_cameras[0].prev_frames
         prev_frames_nxt = viewpoint_cameras[2].prev_frames
-        means3D_prev, _, _, opa_prev, _, _ \
-            = pc._deformation.forward_dynamic(means3D, scales, rotations, opacity, shs, time_prev, force, None, prev_frames_prev)
-        means3D_nxt, _, _, opa_nxt, _, _ \
-            = pc._deformation.forward_dynamic(means3D, scales, rotations, opacity, shs, time_nxt, force, None, prev_frames_nxt)
-        # breakpoint()
-        momentum_reg = torch.abs(means3D_nxt + means3D_prev - 2 * means3D_final).mean()
-        opacity_reg = torch.abs(opa_nxt + opa_prev - 2 * opacity_final).mean()
+        means3D_prev, scales_prev, _, _, shs_prev \
+            = pc._deformation.forward_dynamic(means3D, scales, rotations, opacity, shs, time_prev, force, prev_frames_prev)
+        means3D_nxt, scales_nxt, _, _, shs_nxt \
+            = pc._deformation.forward_dynamic(means3D, scales, rotations, opacity, shs, time_nxt, force, prev_frames_nxt)
+        
+        # time_0 = torch.ones_like(time) * START_FRAME / (MAX_FRAME - 1)
+        # means3D_0, scales_0, rotations_0, opa_0, shs_0, _ \
+        #     = pc._deformation.forward_dynamic(means3D, scales, rotations, opacity, shs, time_0, force, None, None)
+        # scales_0 = pc.scaling_activation(scales_0)
+        # reg_dict['scales'] = torch.abs(scales_0 - scales_final).sum(dim=1).mean()
+        # reg_dict['shs'] = torch.abs(shs_0 - shs_final).mean()
+
+        scales_prev = pc.scaling_activation(scales_prev)
+        scales_nxt = pc.scaling_activation(scales_nxt)        
+        momentum_all = torch.abs(means3D_nxt + means3D_prev - 2 * means3D_final)
+        reg_dict['momentum'] = momentum_all.mean()
+        reg_dict['scales'] = torch.abs(scales_nxt + scales_prev - 2 * scales_final).sum(dim=1).mean()
+        reg_dict['shs'] = torch.abs(shs_nxt + shs_prev - 2 * shs_final).mean()
+        # fastest = torch.topk(momentum_all, k=500, largest=True, dim=0).indices.detach().cpu()
         ############# KNN rigid - nearby points have similar velo ###############
         velocity = (means3D_nxt - means3D_prev) / 2 # approxiamtion
-        k = 10
-        idx, dist = knn(
-            means3D_final[None].contiguous().detach(), 
-            means3D_final[None].contiguous().detach(), 
-            k
-        )
-        
+        k = min(100, n_points)
+        idx, dist = knn(means3D_final[None].contiguous().detach(), means3D_final[None].contiguous().detach(), k)
         vel_dist = torch.norm(velocity[idx] - velocity[None, :, None], p=2, dim=-1)
-        weight = torch.exp(-100 * dist) # * (vel_dist < 0.25).float()
-        # some points teleports when deforming, use this threshold to not learn to teleport
-        # with neighbors
-        knn_reg = (weight * vel_dist).sum() / k / means3D_final.shape[0]
-        ############# KNN rigid - nearby points have similar velo ###############
-
-    # print(f"scales final: {scales_final}")
-    scales_final = pc.scaling_activation(scales_final)
-    rotations_final = pc.rotation_activation(rotations_final)
-    opacity = pc.opacity_activation(opacity_final)
+        weight = torch.exp(-100 * dist)
+        # some points teleports when deforming, use this threshold to not learn to teleport with neighbors
+        reg_dict['knn'] = (weight * vel_dist).sum() / k / n_points
 
     # If precomputed colors are provided, use them. Otherwise, if it is desired to precompute colors
     # from SHs in Python, do it. If not, then SH -> RGB conversion will be done by rasterizer.
-    colors_precomp = None
-    if override_color is None:
-        if pipe.convert_SHs_python:
-            shs_view = pc.get_features.transpose(1, 2).view(-1, 3, (pc.max_sh_degree+1)**2)
-            dir_pp = (pc.get_xyz - viewpoint_camera.camera_center.cuda().repeat(pc.get_features.shape[0], 1))
-            dir_pp_normalized = dir_pp/dir_pp.norm(dim=1, keepdim=True)
-            sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
-            colors_precomp = torch.clamp_min(sh2rgb + 0.5, 0.0)
-    else:
-        colors_precomp = override_color
-
+    # colors_precomp = None
+    # if override_color is None:
+    #     if pipe.convert_SHs_python:
+    #         shs_view = pc.get_features.transpose(1, 2).view(-1, 3, (pc.max_sh_degree+1)**2)
+    #         dir_pp = (pc.get_xyz - viewpoint_camera.camera_center.cuda().repeat(pc.get_features.shape[0], 1))
+    #         dir_pp_normalized = dir_pp/dir_pp.norm(dim=1, keepdim=True)
+    #         sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
+    #         colors_precomp = torch.clamp_min(sh2rgb + 0.5, 0.0)
+    # else:
     rendered_image, radii, depth = rasterizer.forward(
         means3D = means3D_final,
         means2D = means2D,
         shs = shs_final,
-        colors_precomp = colors_precomp,
-        opacities = opacity,
+        colors_precomp = None,
+        opacities = opacity_final,
         scales = scales_final,
         rotations = rotations_final,
         cov3D_precomp = None
     )
-    return rendered_image, screenspace_points, radii > 0, radii, depth, momentum_reg, opacity_reg, knn_reg
+    return rendered_image, screenspace_points, radii > 0, radii, depth, reg_dict
 
 
 @torch.no_grad()
@@ -239,12 +210,8 @@ def render_for_image(
     pipe,
     bg_color: torch.Tensor,
     scaling_modifier = 1.0,
-    override_color = None,
     stage="fine"
 ):
-    # Create zero tensor. We will use it to make pytorch return gradients of the 2D (screen-space) means
-    screenspace_points = torch.zeros_like(pc.get_xyz, dtype=pc.get_xyz.dtype, requires_grad=True, device="cuda") + 0
-
     # Set up rasterization configuration
     raster_settings = GaussianRasterizationSettings(
         image_height=int(viewpoint_camera.image_height),
@@ -258,64 +225,51 @@ def render_for_image(
         sh_degree=pc.active_sh_degree,
         campos=viewpoint_camera.camera_center.cuda(),
         prefiltered=False,
-        debug=pipe.debug
+        debug=False
     )
     n_points = pc.get_xyz.shape[0]
     device = pc.get_xyz.device
     rasterizer = GaussianRasterizer(raster_settings=raster_settings)
-    means2D = screenspace_points
-    opacity = pc._opacity
-    shs = pc.get_features
-    scales = pc._scaling
-    rotations = pc._rotation
-    means3D = pc.get_xyz
-    hidden = None
+    means2D = torch.zeros_like(pc.get_xyz, dtype=pc.get_xyz.dtype, requires_grad=True, device="cuda")
+
+    if (viewpoint_camera.prev_state is not None) and pc._deformation.recur and ('coarse' not in stage):
+        means3D = viewpoint_camera.prev_state['means3D']
+        opacity = viewpoint_camera.prev_state['opacity']
+        shs = viewpoint_camera.prev_state['shs']
+        scales = viewpoint_camera.prev_state['scales']
+        rotations = viewpoint_camera.prev_state['rotations']
+    else:
+        means3D = pc.get_xyz
+        opacity = pc._opacity
+        shs = pc.get_features
+        scales = pc._scaling
+        rotations = pc._rotation
+
     if "coarse" in stage:
         means3D_final, scales_final, rotations_final, opacity_final, shs_final \
             = means3D, scales, rotations, opacity, shs
     else:
         _time = viewpoint_camera.time
         _force = viewpoint_camera.force
-        if "anchor" in stage:
-            _time = cast_time_to_anchor(_time)
+        # if "anchor" in stage:
+        #     _time = cast_time_to_anchor(_time)
         time = torch.tensor(_time).to(dtype=torch.float32, device=device).repeat(n_points, 1)
         force = torch.tensor(_force).to(dtype=torch.float32, device=device).repeat(n_points, 1)
-        if viewpoint_camera.prev_state is not None and pc._deformation.recur_state:
-            means3D = viewpoint_camera.prev_state['means3D']
-            opacity = viewpoint_camera.prev_state['opacity']
-            shs = viewpoint_camera.prev_state['shs']
-            scales = viewpoint_camera.prev_state['scales']
-            rotations = viewpoint_camera.prev_state['rotations']
-        if viewpoint_camera.prev_hidden is not None and pc._deformation.recur_hidden:
-            hidden = viewpoint_camera.prev_hidden.detach()
         prev_frames = viewpoint_camera.prev_frames
-        means3D_final, scales_final, rotations_final, opacity_final, shs_final, _ \
-            = pc._deformation.forward_dynamic(means3D, scales, rotations, opacity, shs, time, force, hidden, prev_frames)
-    if means3D_final.abs().max().detach().item() > 100:
-        print(f"num of irregular pts: {(means3D_final.abs() > 100).sum()}")
-        breakpoint()
+        means3D_final, scales_final, rotations_final, opacity_final, shs_final \
+            = pc._deformation.forward_dynamic(means3D, scales, rotations, opacity, shs, time, force, prev_frames)
+    
+    
     scales_final = pc.scaling_activation(scales_final)
     rotations_final = pc.rotation_activation(rotations_final)
-    opacity = pc.opacity_activation(opacity_final)
+    opacity_final = pc.opacity_activation(opacity_final)
 
-    # If precomputed colors are provided, use them. Otherwise, if it is desired to precompute colors
-    # from SHs in Python, do it. If not, then SH -> RGB conversion will be done by rasterizer.
-    colors_precomp = None
-    if override_color is None:
-        if pipe.convert_SHs_python:
-            shs_view = pc.get_features.transpose(1, 2).view(-1, 3, (pc.max_sh_degree+1)**2)
-            dir_pp = (pc.get_xyz - viewpoint_camera.camera_center.cuda().repeat(pc.get_features.shape[0], 1))
-            dir_pp_normalized = dir_pp/dir_pp.norm(dim=1, keepdim=True)
-            sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
-            colors_precomp = torch.clamp_min(sh2rgb + 0.5, 0.0)
-    else:
-        colors_precomp = override_color
     rendered_image, radii, depth = rasterizer.forward(
         means3D = means3D_final,
         means2D = means2D,
         shs = shs_final,
-        colors_precomp = colors_precomp,
-        opacities = opacity,
+        colors_precomp = None,
+        opacities = opacity_final,
         scales = scales_final,
         rotations = rotations_final,
         cov3D_precomp = None
