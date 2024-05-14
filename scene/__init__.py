@@ -32,15 +32,10 @@ class Scene:
                 self.loaded_iter = load_iteration
             print("Loading trained model at iteration {}".format(self.loaded_iter))
 
-
-        # scene_info = readForceSyntheticInfo(
-        #     args.data_path_train, args.data_path_test,
-        #     args.n_train_cams, args.n_test_cams,
-        #     args.white_background
-        # )
         scene_info = readForceSyntheticInfo2(
             args.data_path_train, args.data_path_test,
-            args.n_train_cams, args.n_test_cams, args.prev_frames
+            args.n_train_cams, args.n_test_cams,
+            args.prev_frames, args.next_frames
         )
         self.maxtime = scene_info.maxtime
         self.dataset_type = "blender"

@@ -76,13 +76,12 @@ class PipelineParams(ParamGroup):
 class ModelHiddenParams(ParamGroup):
     def __init__(self, parser):
         self.net_width = 64
-        self.timebase_pe = 4
         self.defor_depth = 1
         self.posebase_pe = 10
         self.scale_rotation_pe = 2
         self.opacity_pe = 2
-        self.timenet_width = 64
-        self.timenet_output = 32
+        self.force_pe = 2
+        self.time_pe = 2
         self.bounds = 1.6
         self.plane_tv_weight = 0.0001
         self.time_smoothness_weight = 0.01

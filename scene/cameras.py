@@ -68,12 +68,14 @@ class Camera():
         depth,
         mask,
         prev_frames,
+        next_frames,
         time = 0,
         frame_step = 0,
         force: np.ndarray = None,
         full_force: np.ndarray = None,
         force_idx: int = -1,
-        pos_idx: int = -1
+        pos_idx: int = -1,
+        unit_time: float = 1.,
     ) -> None:
         self.R = R
         self.T = T
@@ -88,6 +90,7 @@ class Camera():
         self.image_height = self.original_image.shape[1]
         self.depth = depth
         self.prev_frames = None if prev_frames is None else prev_frames.clamp(0.0, 1.0)
+        self.next_frames = None if next_frames is None else next_frames.clamp(0.0, 1.0)
         ''' start, for idx0based prev frame '''
         # self.prev_frames = torch.ones_like(self.prev_frames) * pos_idx / 720
         ''' end, 720 is a magic number '''
@@ -101,3 +104,4 @@ class Camera():
         self.camera_center = self.world_view_transform.inverse()[3, :3]
         self.pos_idx = pos_idx
         self.prev_state = None # means3D
+        self.unit_time = unit_time

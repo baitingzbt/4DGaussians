@@ -1,16 +1,11 @@
 OptimizationParams = dict(
-    coarse_iterations = 3000, # default: 3000
     deformation_lr_init = 0.00016,
     deformation_lr_final = 0.0000016,
     deformation_lr_delay_mult = 0.01,
     grid_lr_init = 0.0016,
     grid_lr_final = 0.000016,
-    iterations = 200000, # default 20000, tried: 200K
-    pruning_interval = 8000,
     percent_dense = 0.01,
-    render_process=True,
-    # no_do=False,
-    # no_dshs=False
+    render_process=True
 )
 
 ModelHiddenParams = dict(

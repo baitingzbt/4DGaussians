@@ -26,7 +26,7 @@ from scene.gaussian_model import BasicPointCloud
 from utils.general_utils import PILtoTorch
 from tqdm import tqdm
 import re
-MAX_FRAME = 40
+MAX_FRAME = 10
 START_FRAME = 0 # 0: use all frames, otherwise drops first n frames
 
 class CameraInfo(NamedTuple):
@@ -402,6 +402,25 @@ def get_prev_images(path: str, prev: int = 4, width = 480, height = 480) -> torc
         _i = i + max(0, prev - cur_step)
         prev_imgs[_i] = img
     return prev_imgs
+
+
+def get_next_images(path: str, next: int = 4, width = 480, height = 480) -> torch.TensorType:
+    if next <= 0:
+        return None
+    infos = path.split('_')
+    cur_step = infos[-1] # xxx.png
+    cur_step = int(cur_step.split('.')[0])
+    end_step = min(MAX_FRAME-1, cur_step + next)
+    next_imgs = torch.zeros((next, 3, width, height))
+    for i, _s in enumerate(range(cur_step, end_step)):
+        # keep as 0
+        if _s >= MAX_FRAME:
+            continue
+        new_path = "_".join(infos[:-1] + [f'{_s:03}.png'])
+        assert os.path.exists(new_path), print(f"wrong, {_s = }")
+        img = get_image_tensor(new_path, width=width, height=height)[0]
+        next_imgs[i] = img
+    return next_imgs
     
 
 # use with cautious, lots of special case and magic numbers to maximize reading speed
@@ -411,6 +430,7 @@ def readCamShortParallel(
     force_idx: int,
     pos_idx: int,
     prev_frames: int = 0,
+    next_frames: int = 0
 ) -> List[Camera]:
     cams: List[Camera] = []
     with open(f"{path}/transforms_short.json") as json_file:
@@ -422,7 +442,7 @@ def readCamShortParallel(
     force = np.array(contents['force'])[3:5] # / 100 # only keep xy rotations
     # if abs(np.degrees(force[0])) <= 45.1:
     #     return []
-    # force = force_process(force)
+    force = force_process(force)
     def read_fn(idx_frame) -> Camera:
         frame_step, frame = idx_frame
         # print(f"{frame_step = }")
@@ -435,6 +455,7 @@ def readCamShortParallel(
         seg_path = seg_path if os.path.isfile(seg_path) else None
         rgb, dep, seg = get_image_tensor(rgb_path, dep_path, seg_path)
         prev_arr = get_prev_images(rgb_path, prev=prev_frames)
+        next_arr = get_next_images(rgb_path, next=next_frames)
         # print(f"{frame_step = } | time = {mapper[frame['time']]}")
         cam = Camera(
             R=R,
@@ -445,12 +466,14 @@ def readCamShortParallel(
             depth=dep,
             mask=seg,
             prev_frames=prev_arr,
+            next_frames=next_arr,
             time=mapper[frame["time"]],
             frame_step=frame_step,
             force=force,
             full_force=[np.rint(np.degrees(np.array(contents['force'])[3])), np.rint(np.degrees(np.array(contents['force'])[4]))],
             force_idx=force_idx,
-            pos_idx=pos_idx
+            pos_idx=pos_idx,
+            unit_time=1/(MAX_FRAME - 1)
         )
         return cam
 
@@ -522,7 +545,8 @@ def readForceSyntheticInfo2(
     paths_test: List[str],
     n_train_cams: List[int],
     n_test_cams: List[int],
-    prev_frames: int = 0
+    prev_frames: int = 0,
+    next_frames: int = 0
 ):
     paths = paths_train + paths_test
     timestamp_mapper, maxtime = read_force_timeline(paths_train, paths_test)
@@ -530,12 +554,12 @@ def readForceSyntheticInfo2(
     def helper_train(args) -> List[Camera]:
         path, i, force_idx = args
         cam_path = os.path.join(f"{path}/train", os.listdir(f"{path}/train")[i])
-        return readCamShortParallel(cam_path, timestamp_mapper, force_idx, i, prev_frames)
+        return readCamShortParallel(cam_path, timestamp_mapper, force_idx, i, prev_frames, next_frames)
     
     def helper_test(args) -> List[Camera]:
         path, i, force_idx = args
         cam_path = os.path.join(f"{path}/test", os.listdir(f"{path}/test")[i])
-        return readCamShortParallel(cam_path, timestamp_mapper, force_idx, i, prev_frames)
+        return readCamShortParallel(cam_path, timestamp_mapper, force_idx, i, prev_frames, next_frames)
 
     import time
     time_start = time.time()

@@ -103,15 +103,12 @@ def interpolate_ms_features(
     grid_dimensions: int,
     concat_features: bool
 ) -> torch.Tensor:
-    coo_combs = list(
-        itertools.combinations(range(pts.shape[-1]), grid_dimensions)
-    )
+    coo_combs = list(itertools.combinations(range(pts.shape[-1]), grid_dimensions))
     # drop plane for (f, t) (3, 4) if it exists
     if len(coo_combs) == 10:
         coo_combs = coo_combs[:-1]
     multi_scale_interp = [] if concat_features else 0.
     grid: nn.ParameterList
-    # breakpoint()
     for scale_id, grid in enumerate(ms_grids):
         interp_space = 1.
         for ci, coo_comb in enumerate(coo_combs):

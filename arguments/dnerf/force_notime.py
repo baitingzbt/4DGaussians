@@ -1,35 +1,35 @@
 _base_ = './dnerf_default.py'
 
 USE_FORCE = True
-USE_TIME = True
-BLEND_TIME_FORCE = True
-RESOLUTION = [64, 64, 64, 256]
-INPUT_DIM = 4
+USE_TIME = False
+BLEND_TIME_FORCE = False
+RESOLUTION = [64, 64, 64]
+INPUT_DIM = 3
 
-# if USE_TIME and USE_FORCE:
-#     # add 1 for time
-#     RESOLUTION += [128]
-#     INPUT_DIM += 1
-#     # add 1 for force, if not blending
-#     if not BLEND_TIME_FORCE:
-#         RESOLUTION += [128]
-#         INPUT_DIM += 1
-# else:
-#     # only using 1 of time / force, using none is invalid
-#     assert USE_TIME or USE_FORCE
-#     # shouldn't blend
-#     assert not BLEND_TIME_FORCE
-#     # add dimension for that
-#     RESOLUTION += [128]
-#     INPUT_DIM += 1
+if USE_TIME and USE_FORCE:
+    # add 1 for time
+    RESOLUTION += [128]
+    INPUT_DIM += 1
+    # add 1 for force, if not blending
+    if not BLEND_TIME_FORCE:
+        RESOLUTION += [128]
+        INPUT_DIM += 1
+else:
+    # only using 1 of time / force, using none is invalid
+    assert USE_TIME or USE_FORCE
+    # shouldn't blend
+    assert not BLEND_TIME_FORCE
+    # add dimension for that
+    RESOLUTION += [128]
+    INPUT_DIM += 1
 
 OptimizationParams = dict(
-    coarse_iterations = 10000, # 10000, # default: 3000
+    coarse_iterations = 2000, # 10000, # default: 3000
     anchor_iterations = 0,
-    densify_until_iter = 20000,
+    densify_until_iter = 10000,
     iterations = 5000000,
-    batch_size = 8,
-    pruning_interval = 5000,
+    batch_size = 128,
+    pruning_interval = 100, # don't prune
 )
 
 ModelParams = dict(
@@ -61,8 +61,6 @@ ModelHiddenParams = dict(
     no_dr=True,
     no_do=True,
     no_dshs=True,
-    force_pe=4,
-    time_pe=4
 )
 
 

@@ -63,15 +63,27 @@ class GaussianModel:
         self.spatial_lr_scale = 0
         self._deformation_table = torch.empty(0)
         self.setup_functions()
-        if args.use_force and not args.blend_time_force:
-            self.time_grids = [2, 5, 7]
-            self.force_grids = [3, 6, 8]
-            self.plane_grids = [0, 1, 4]
-        else:
+        if args.use_force and args.use_time:
+            if not args.blend_time_force:
+                self.time_grids = [2, 5, 7]
+                self.force_grids = [3, 6, 8]
+                self.plane_grids = [0, 1, 4]
+            else:
+                self.time_grids = [2, 4, 5]
+                self.force_grids = []
+                self.plane_grids = [0, 1, 3]
+        elif args.use_force and not args.use_time:
+            self.time_grids = []
+            self.force_grids = [2, 4, 5]
+            self.plane_grids = [0, 1, 3]
+        elif not args.use_force and args.use_time:
             self.time_grids = [2, 4, 5]
             self.force_grids = []
             self.plane_grids = [0, 1, 3]
+        else:
+            raise NotImplementedError
         self.args = args
+        self._deform_forward_dyn = lambda *args: None
     
     def capture(self):
         return (
@@ -673,12 +685,15 @@ class GaussianModel:
     
     # CALLED AT FINE STAGE ONLY, OUTPUT ADDED TO LOSS
     def compute_regulation(self, time_smoothness_weight, l1_time_planes_weight, l2_time_planes_weight, plane_tv_weight, force_weight):
-        time_reg = torch.tensor(0) if time_smoothness_weight <= 1e-7 else time_smoothness_weight * self._time_regulation()
         plane_reg = torch.tensor(0) if plane_tv_weight <= 1e-7 else plane_tv_weight * self._plane_regulation()
-        l1_time_reg = torch.tensor(0) if l1_time_planes_weight <= 1e-7 else l1_time_planes_weight * self._l1_regulation()
-        l2_time_reg = torch.tensor(0) if l2_time_planes_weight <= 1e-7 else l2_time_planes_weight * self._l2_regulation()
+        l1_time_reg = torch.tensor(0) if (not self.args.use_time) or l1_time_planes_weight <= 1e-7 \
+            else l1_time_planes_weight * self._l1_regulation()
+        l2_time_reg = torch.tensor(0) if (not self.args.use_time) or l2_time_planes_weight <= 1e-7 \
+            else l2_time_planes_weight * self._l2_regulation()
         force_reg = torch.tensor(0) if (not self.args.use_force) or self.args.blend_time_force or force_weight <= 1e-7 \
             else force_weight * self._force_regulation()
+        time_reg = torch.tensor(0) if (not self.args.use_time) or time_smoothness_weight <= 1e-7 \
+            else time_smoothness_weight * self._time_regulation()
         # time_reg = time_reg.clamp(2e-5) # don't go below 1e-5
         # plane_reg = plane_reg.clamp(2e-6)
         reg_loss_dict = defaultdict(lambda: torch.tensor(0))
