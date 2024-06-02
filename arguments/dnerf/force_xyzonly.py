@@ -8,9 +8,9 @@ INPUT_DIM = 4
 
 
 OptimizationParams = dict(
-    coarse_iterations = 10000, # 20000, # 10000, # default: 3000
+    coarse_iterations = 30000, # 20000, # 10000, # default: 3000
     anchor_iterations = 0,
-    densify_until_iter = 40000,
+    densify_until_iter = 20000,
     iterations = 5000000,
     batch_size = 8,
     pruning_interval = 5000,
@@ -39,12 +39,14 @@ ModelHiddenParams = dict(
     multires = [1, 2],
     no_dx=False,
     no_grid=False,
-    no_ds=False,
-    no_dr=False,
+    no_ds=True,
+    no_dr=True,
     no_do=True,
-    no_dshs=False,
+    no_dshs=True,
     force_pe=4,
-    time_pe=4
+    time_pe=4,
+    scale_rotation_pe = 0,
+    opacity_pe = 0
 )
 
 

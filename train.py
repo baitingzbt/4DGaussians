@@ -30,13 +30,13 @@ import math
 from utils.scene_utils import render_training_image
 from collections import defaultdict
 from typing import List
-from scene.dataset_readers import START_FRAME, MAX_FRAME
+from scene.dataset_readers import START_FRAME, MAX_FRAME, CAM_W, CAM_H
 
-EVAL_ONLY = False
+EVAL_ONLY = True
 FRAMES_EACH = MAX_FRAME - START_FRAME
 EVAL_EVERY = 5000 # 10000
 SAVE_EVERY = 20000
-LOG_EVERY = 500 # 500
+LOG_EVERY = 100 # 500
 MAX_PHASE = 10
 RECUR = False
 
@@ -80,8 +80,8 @@ def scene_reconstruction(
     pipe.debug = True
     if stage == "coarse":
         train_iter = opt.coarse_iterations
-    elif stage == "anchor":
-        train_iter = opt.anchor_iterations
+    # elif stage == "anchor":
+    #     train_iter = opt.anchor_iterations
     elif stage == "fine":
         train_iter = opt.iterations
     
@@ -109,12 +109,16 @@ def scene_reconstruction(
     train_cams = scene.getTrainCameras()
 
     if EVAL_ONLY:
+        # parameters are initialized all to 0, so even if trained without extra deform
+        # it will output 0 delta
+        # gaussians._deformation.deformation_net.enable_extra_deform()
         avg_l1_test, avg_psnr_test = render_training_image(
             scene, gaussians, test_cams, pipe, background, stage+"test",
-            first_iter, 0, True, False, False)
+            first_iter, 0, True, False, use_wandb)
+        # eval_train_cams = [cam for cam in train_cams if cam.frame_step == START_FRAME]
         avg_l1_train, avg_psnr_train = render_training_image(
-            scene, gaussians, train_cams[:10*FRAMES_EACH], pipe, background, stage+"train",
-            first_iter, 0, True, False, False)
+            scene, gaussians, train_cams, pipe, background, stage+"train",
+            first_iter, 0, True, False, use_wandb)
         exit()
 
 
@@ -130,34 +134,37 @@ def scene_reconstruction(
     #     train_cams = filter_cams(train_cams, phase=phase)
     #     final_iter = [100, 100, 800, 1000, 8000, 16000, 20000, 20000, 20000, 20000][phase]
     n_train_views = len(train_cams)
-    for iteration in range(first_iter, final_iter):        
-        if iteration > EVAL_EVERY * 4 and "coarst" not in stage:
-            gaussians._deformation.deformation_net.enable_extra_deform()
+    for iteration in range(first_iter, final_iter):
+        # if iteration == EVAL_EVERY * 8 and "coarse" not in stage:
+        #     print("\n\n << ENBALE EXTRA DEFORM >> \n\n")
+        #     gaussians._deformation.deformation_net.enable_extra_deform()
         gaussians.update_learning_rate(iteration)
 
-        # Every 1000 its we increase the levels of SH up to a maximum degree
-        if iteration % 1000 == 0:
-            gaussians.oneupSHdegree()
+        # # Every 1000 its we increase the levels of SH up to a maximum degree
+        # if iteration % 1000 == 0:
+        #     gaussians.oneupSHdegree()
 
-        # if RECUR \
-        #     and (iteration % 100 == 0) \
-        #     and ("coarse" not in stage) \
-        #     and (iteration > opt.densify_until_iter or iteration < opt.densify_from_iter):
-        #     train_cams = get_state(train_cams, gaussians)
+        if RECUR \
+            and (iteration % 100 == 0) \
+            and ("coarse" not in stage) \
+            and (iteration > opt.densify_until_iter or iteration < opt.densify_from_iter):
+            train_cams = get_state(train_cams, gaussians)
         
         points = gaussians.get_xyz.shape[0]
         n_next = dataset.next_frames
-        image_tensor = torch.zeros(size=(batch_size, 3, 480, 480), device='cuda')
-        gt_image_tensor = torch.zeros(size=(batch_size, 3, 480, 480), device='cuda')
-        next_rgb_render = torch.zeros(size=(batch_size, n_next, 3, 480, 480), device='cuda')
-        next_rgb_gt = torch.zeros(size=(batch_size, n_next, 3, 480, 480), device='cuda')
+        image_tensor = torch.zeros(size=(batch_size, 3, CAM_W, CAM_H), device='cuda')
+        gt_image_tensor = torch.zeros(size=(batch_size, 3, CAM_W, CAM_H), device='cuda')
+        next_rgb_render = torch.zeros(size=(batch_size, n_next, 3, CAM_W, CAM_H), device='cuda')
+        next_rgb_gt = torch.zeros(size=(batch_size, n_next, 3, CAM_W, CAM_H), device='cuda')
         visibility_tensor = torch.zeros(size=(batch_size, points), device='cuda')
         radii_tensor = torch.zeros(size=(batch_size, points), device='cuda')
         viewspace_point_tensor = []
-        total_momentum_reg = 0
-        total_knn_reg = 0
-        total_shs_reg = 0
-        total_scales_reg = 0
+        total_momentum_reg = torch.tensor(0.0, device='cuda')
+        total_knn_reg_xyz = torch.tensor(0.0, device='cuda')
+        total_knn_reg_long = torch.tensor(0.0, device='cuda')
+        total_knn_reg_rot = torch.tensor(0.0, device='cuda')
+        total_shs_reg = torch.tensor(0.0, device='cuda')
+        total_scales_reg = torch.tensor(0.0, device='cuda')
         query_idxs = np.random.choice(range(n_train_views), batch_size, replace=False)
         for _i, query_idx in enumerate(query_idxs):
             # _query_idx = query_idx
@@ -182,7 +189,9 @@ def scene_reconstruction(
                 next_rgb_gt[_i] = train_view.next_frames
 
             total_momentum_reg += 0.000001 * reg_dict['momentum']
-            total_knn_reg += reg_dict['knn']
+            total_knn_reg_xyz += reg_dict['knn_xyz']
+            total_knn_reg_long += 0.1 * reg_dict['knn_long']
+            total_knn_reg_rot += reg_dict['knn_rot']
             total_shs_reg += 0.001 * reg_dict['shs']
             total_scales_reg += 0.001 * reg_dict['scales']
             
@@ -195,22 +204,23 @@ def scene_reconstruction(
         psnr_ = psnr(image_tensor, gt_image_tensor).mean()
         # norm
         if stage in ["fine", "anchor"]:
-            l1_reg_weight = hyper.l1_time_planes
-            l2_reg_weight = hyper.l2_time_planes
-            time_weight = hyper.time_smoothness_weight
-            plane_weight = hyper.plane_tv_weight
-            force_weight = hyper.force_weight
             tv_loss_dict = gaussians.compute_regulation(
-                time_weight, l1_reg_weight, l2_reg_weight, plane_weight, force_weight
+                hyper.time_smoothness_weight,
+                hyper.l1_time_planes,
+                hyper.l2_time_planes,
+                hyper.plane_tv_weight,
+                hyper.force_weight
             )
             loss += tv_loss_dict['total_reg']
-            loss += total_momentum_reg # * float(total_momentum_reg > 2e-6)
-            loss += total_knn_reg
+            loss += total_momentum_reg
+            loss += total_knn_reg_xyz
+            loss += total_knn_reg_long
+            loss += total_knn_reg_rot
             loss += total_shs_reg
             loss += total_scales_reg
             if n_next > 0:
                 nxt_loss = l1_loss(next_rgb_render, next_rgb_gt)
-                loss += nxt_loss
+                loss += nxt_loss / n_next
                 tv_loss_dict['nxt_loss'] = nxt_loss
         else:
             tv_loss_dict = defaultdict(lambda: torch.tensor(0)) # assume to be 0 for coarse
@@ -230,7 +240,9 @@ def scene_reconstruction(
                     "psnr": round(psnr_.item(), 2),
                     "point": points,
                     "mom_reg": total_momentum_reg.item(),
-                    "knn_reg": total_knn_reg.item(),
+                    "knn_reg_xyz": total_knn_reg_xyz.item(),
+                    "knn_reg_long": total_knn_reg_long.item(),
+                    "knn_reg_rot": total_knn_reg_rot.item(),
                     "shs_reg": total_shs_reg.item(),
                     "scales_reg": total_scales_reg.item()
                 }
@@ -260,14 +272,14 @@ def scene_reconstruction(
                 torch.save((gaussians.capture(), iteration), save_path)
             
             if (iteration % EVAL_EVERY == EVAL_EVERY - 1) or (iteration == final_iter-1):
-                # if RECUR and ("coarse" not in stage):
-                #     train_cams = get_state(train_cams, gaussians)
-                #     test_cams = get_state(test_cams, gaussians)
+                if RECUR and ("coarse" not in stage):
+                    train_cams = get_state(train_cams, gaussians)
+                    test_cams = get_state(test_cams, gaussians)
                 avg_l1_test, avg_psnr_test = render_training_image(
                     scene, gaussians, test_cams, pipe, background, stage+"test",
                     iteration, timer.get_elapsed_time(), save_video, save_pointclound, use_wandb)
                 avg_l1_train, avg_psnr_train = render_training_image(
-                    scene, gaussians, train_cams[:FRAMES_EACH * 3], pipe, background, stage+"train",
+                    scene, gaussians, train_cams[:FRAMES_EACH * 10], pipe, background, stage+"train",
                     iteration, timer.get_elapsed_time(), save_video, save_pointclound, use_wandb)
                 if use_wandb:
                     infos = {
@@ -280,7 +292,7 @@ def scene_reconstruction(
 
             timer.start()
             # Densification
-            if iteration < opt.densify_until_iter: # and (stage == "coarse" or not RECUR):
+            if iteration < opt.densify_until_iter and (stage == "coarse" or not RECUR):
                 # Keep track of max radii in image-space for pruning
                 gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter].cuda(), radii[visibility_filter].cuda())
                 gaussians.add_densification_stats(viewspace_point_tensor_grad, visibility_filter)
@@ -297,7 +309,7 @@ def scene_reconstruction(
                     gaussians.densify(densify_threshold, opacity_threshold, scene.cameras_extent, size_threshold, 5, 5, scene.model_path, iteration, stage)
 
                 # don't prune if it is RECUR training
-                if iteration > opt.pruning_from_iter and iteration % opt.pruning_interval == 0 and gaussians.get_xyz.shape[0] > 3000 and not RECUR:
+                if iteration > opt.pruning_from_iter and iteration % opt.pruning_interval == 0 and gaussians.get_xyz.shape[0] > 3000: # and not RECUR:
                     size_threshold = 40 if iteration > opt.opacity_reset_interval else None
                     gaussians.prune(densify_threshold, opacity_threshold, scene.cameras_extent, size_threshold)
                     
@@ -305,8 +317,8 @@ def scene_reconstruction(
                     gaussians.grow(5, 5, scene.model_path, iteration, stage)
                 
                 # do this extra get-state everytime densify/prune to align datasize
-                # if iteration % opt.densification_interval == 0 and ('coarse' not in stage) and RECUR:
-                #     train_cams = get_state(train_cams, gaussians)
+                if iteration % opt.densification_interval == 0 and ('coarse' not in stage) and RECUR:
+                    train_cams = get_state(train_cams, gaussians)
 
                 if iteration % opt.opacity_reset_interval == 0:
                     print("reset opacity")

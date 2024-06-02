@@ -6,12 +6,14 @@ from utils.graphics_utils import apply_rotation, batch_quaternion_multiply
 from scene.hexplane import HexPlaneField
 from scene.grid import DenseGrid
 
+
+# initialize model weight all to 0
 def init_zero_(model: nn.Sequential):
-    for layer in model:
-        if isinstance(layer, nn.Linear):
-            nn.init.constant_(layer.weight, 0)
-            if layer.bias is not None:
-                nn.init.constant_(layer.bias, 0)  # Set biases to zero
+    for m in model:
+        if isinstance(m, nn.Linear):
+            init.zeros_(m.weight)
+            if m.bias is not None:
+                init.zeros_(m.bias)
 
 class Deformation(nn.Module):
     def __init__(self, D=8, W=256, grid_pe=0, args=None):
@@ -65,14 +67,14 @@ class Deformation(nn.Module):
             nn.Linear(128, self.prev_frames_out_dim),
         )
         total_prev_frames_dim = self.prev_frames * self.prev_frames_out_dim
-        grid_out_dim = self.grid.feat_dim + self.grid_pe * (self.grid.feat_dim) * 2 
+        grid_out_dim = self.grid.feat_dim + self.grid_pe * (self.grid.feat_dim) * 2
+        deform_extra_dim = 1 + 2 * self.force_pe + 1 + 2 * self.time_pe
         self.feature_out1 = nn.Linear(grid_out_dim + total_prev_frames_dim, grid_out_dim)
         self.feature_out2 = [nn.Linear(grid_out_dim, self.W, dtype=torch.float32, bias=True)]
         for i in range(self.D - 1):
             self.feature_out2.append(nn.ReLU())
             self.feature_out2.append(nn.Linear(self.W, self.W, dtype=torch.float32, bias=True))
         self.feature_out2 = nn.Sequential(*self.feature_out2)
-        deform_extra_dim = 1 + 2 * self.force_pe + 1 + 2 * self.time_pe
         self.pos_deform = nn.Sequential(
             nn.ReLU(), nn.Linear(self.W + self.extra_point_dim + deform_extra_dim, self.W, dtype=torch.float32, bias=True),
             # nn.ReLU(), nn.Linear(self.W, self.W),
@@ -108,6 +110,14 @@ class Deformation(nn.Module):
             nn.ReLU(), nn.Linear(self.W, 16 * 3, dtype=torch.float32, bias=True)
         )
         init_zero_(self.shs_deform)
+        
+        # use an auto-regressive transformer-world-model to take prev-hidden state and time, force and current
+        # hidden state to predict the next hidden state
+        # e.g. each-step's tokens are (ht, ft, t), take tokens from previous steps to predict ht+1
+        # 
+        # self.world_model = WorldModel(
+        #     input_dim=self.W, hidden_dim=self.W, output_dim=self.W, num_layers=2, dropout=0.5
+        # )
 
         # self.force_embedder = nn.Linear(21, 1)
         self.force_embedder = nn.Linear(2, 1)
@@ -126,11 +136,6 @@ class Deformation(nn.Module):
         # if self.grid_pe > 1:
         #     grid_feature = poc_fre(grid_feature, self.grid_pe)
         #     grid_feature = torch.cat([grid_feature], -1).to(dtype=torch.float32)
-
-        ### tmp hack below ###
-        # time_emb = self.force_time_embed(torch.cat((time_emb, self.force_embedder(force_emb)), dim=1))
-        # grid_feature = self.grid.forward(rays_pts_emb[:, :3], time_emb, None) # [n_pts, xxx]
-        ### tmp hack above ###
         if prev_frames_emb is not None:
             grid_feature = self.feature_out1(torch.cat((grid_feature, prev_frames_emb), dim=1))
         return self.feature_out2(grid_feature)
@@ -256,8 +261,7 @@ class deform_network(nn.Module):
     @property
     def get_empty_ratio(self):
         return self.deformation_net.get_empty_ratio
-    # Gaussian -> DeformationNet -> HexPlane
-    # xyz_init -> poc_fre -> HexPlane -> HiddenFeature -> deform
+
     def forward_dynamic(self, points_in, scales_in, rotations_in, opacity_in, shs_in, times_sel_in, force_in, prev_frames):
         point_emb = poc_fre(points_in, self.pos_poc)
         scales_emb = poc_fre(scales_in, self.rotation_scaling_poc)
@@ -270,7 +274,7 @@ class deform_network(nn.Module):
         return means3D, scales, rotations, opacity, shs # , fastest
         
     def get_mlp_parameters(self):
-        return self.deformation_net.get_mlp_parameters() # + list(self.timenet.parameters())
+        return self.deformation_net.get_mlp_parameters()
 
     def get_grid_parameters(self):
         return self.deformation_net.get_grid_parameters()
