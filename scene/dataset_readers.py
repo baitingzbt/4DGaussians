@@ -272,6 +272,7 @@ def readCamShortParallel(
     next_frames: int = 0
 ) -> List[Camera]:
     cams: List[Camera] = []
+    # print(f"{path = }, {force_idx = }, {pos_idx = }")
     with open(f"{path}/transforms_short.json") as json_file:
         contents: Dict = json.load(json_file)
     matrix = -np.linalg.inv(np.array(contents["transform_matrix"]))
@@ -279,7 +280,10 @@ def readCamShortParallel(
     R[:, 0] = -R[:, 0]
     # force = force_process2(np.array(contents['force'])[3:5]) * 10  #  directly drop positions here
     force = np.array(contents['force'])[3:5] # / 100 # only keep xy rotations
-    print(f"\n{path = },   {'_'.split(path)[:2]}\n")
+    pose_idx = int(path.split('_')[2])
+    # if pose_idx != 1:
+    #     return []
+    # print(f"{path = },   {path.split('_')[2]}")
     # breakpoint()
     force = force_process(force)
     def read_fn(idx_frame) -> Camera:
@@ -312,6 +316,7 @@ def readCamShortParallel(
             force=force,
             full_force=[np.rint(np.degrees(np.array(contents['force'])[3])), np.rint(np.degrees(np.array(contents['force'])[4]))],
             force_idx=force_idx,
+            pose_idx=pose_idx,
             pos_idx=pos_idx,
             unit_time=1/(MAX_FRAME - 1)
         )

@@ -45,8 +45,8 @@ ModelHiddenParams = dict(
     no_dshs=True,
     force_pe=4,
     time_pe=4,
-    scale_rotation_pe = 0,
-    opacity_pe = 0
+    # scale_rotation_pe = 2,
+    # opacity_pe = 2
 )
 
 

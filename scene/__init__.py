@@ -13,7 +13,7 @@ import os
 from utils.system_utils import searchForMaxIteration
 from scene.gaussian_model import GaussianModel
 from arguments import ModelParams
-from scene.dataset_readers import add_points, readForceSyntheticInfo, readForceSyntheticInfo2
+from scene.dataset_readers import add_points, readForceSyntheticInfo2
 
 class Scene:
 

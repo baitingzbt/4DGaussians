@@ -74,6 +74,7 @@ class Camera():
         force: np.ndarray = None,
         full_force: np.ndarray = None,
         force_idx: int = -1,
+        pose_idx: int = -1,
         pos_idx: int = -1,
         unit_time: float = 1.,
     ) -> None:
@@ -97,6 +98,7 @@ class Camera():
         self.mask = None if mask is None else mask[0]
         self.force = force
         self.full_force = full_force
+        self.pose_idx = pose_idx
         self.force_idx = force_idx
         self.world_view_transform = torch.tensor(getWorld2View2(R, T, np.array([0.0, 0.0, 0.0]), 1.), dtype=torch.float32).transpose(0, 1)
         projection_matrix = getProjectionMatrix(znear=0.01, zfar=100., fovX=self.FoVx, fovY=self.FoVy).transpose(0,1) # 

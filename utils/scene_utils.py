@@ -15,6 +15,7 @@ from .image_utils import psnr_np
 from multiprocessing.pool import ThreadPool
 from tqdm import tqdm
 from scene.dataset_readers import START_FRAME, MAX_FRAME
+import pickle
 FONT = ImageFont.truetype('./utils/TIMES.TTF', size=40) # 选择字体和字体大小
 TXT_COLOR = (255, 0, 0)  # 白色
 LABEL1_POS = (10, 10) # 选择标签的位置（左上角坐标
@@ -37,6 +38,7 @@ def render_training_image(
     gaussians._deformation.deformation_net.eval()
     times = round(time_now / 60, 2)
     label2 = f"time: {times} mins"
+    loss_and_psnr = []   # force_idx, cam_pose_idx, loss, psnr 
     def render_helper(i, viewpoint: Camera) -> Tuple[np.ndarray, float, float]:
         # if viewpoint.frame_step in [START_FRAME, MAX_FRAME-1]:
         #     return None, None, None
@@ -57,8 +59,10 @@ def render_training_image(
         draw1.text(LABEL1_POS, label1, fill=TXT_COLOR, font=FONT)
         draw1.text(label2_position, label2, fill=TXT_COLOR, font=FONT)
         image_with_label_arr = np.array(image_with_labels)
+        loss_and_psnr.append(list(viewpoint.full_force) + [viewpoint.pose_idx, loss, psnr])
         return image_with_label_arr, loss, psnr
     
+
     render_base_path = os.path.join(scene.model_path, f"{stage}_render")
     point_cloud_path = os.path.join(render_base_path, "pointclouds")
     image_path = os.path.join(render_base_path, "images")
@@ -77,7 +81,9 @@ def render_training_image(
             all_renders.append(img)
             all_test_loss.append(loss)
             all_psnr.append(psnr)
-
+    loss_and_psnr = np.array(loss_and_psnr)
+    with open(stage + "_full_loss_and_psnr.pkl", "wb") as f:
+        pickle.dump(loss_and_psnr, f)
     # breakpoint()
     # with ThreadPool() as pool:
     #     all_renders_infos: List = pool.map(

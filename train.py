@@ -116,9 +116,9 @@ def scene_reconstruction(
             scene, gaussians, test_cams, pipe, background, stage+"test",
             first_iter, 0, True, False, use_wandb)
         # eval_train_cams = [cam for cam in train_cams if cam.frame_step == START_FRAME]
-        avg_l1_train, avg_psnr_train = render_training_image(
-            scene, gaussians, train_cams, pipe, background, stage+"train",
-            first_iter, 0, True, False, use_wandb)
+        # avg_l1_train, avg_psnr_train = render_training_image(
+        #     scene, gaussians, train_cams, pipe, background, stage+"train",
+        #     first_iter, 0, True, False, use_wandb)
         exit()
 
 
@@ -450,3 +450,7 @@ if __name__ == "__main__":
 
     # All done
     print("\nTraining complete.")
+
+# CUDA_VISIBLE_DEVICES=1 python train.py --data_path_train data_new/scene4 --data_path_test data_new/scene4 --n_train_cams 1080 --n_test_cams 30 --expname test3 --configs arguments/dnerf/force_xyzonly.py --next_frames 3 --start_checkpoint chkpnt_fine_179999.pth
+
+# CUDA_VISIBLE_DEVICES=1 python train.py --data_path_train data_new/scene4 --data_path_test data_new/scene4 --n_train_cams 1080 --n_test_cams 15 --expname test --configs arguments/dnerf/force_xyzonly.py --next_frames 0 --start_checkpoint chkpnt_fine_119999.pth
