@@ -180,6 +180,12 @@ pip install -e submodules/depth-diff-gaussian-rasterization
 pip install -e submodules/simple-knn
 
 finally, other packages using pip. Note: key is to align versions of torch and cuda. cuda-toolkit is 11.8 and cudatoolkit-dev is 11.7, this is espected. Don't install cuda-toolkit 11.7, otherwise you might run into troubles later...
+
+Might also need the following:
+
+conda install conda-forge::glm
+
+conda install -c numba cudatoolkit=11.8
 ```
 @article{wu20234dgaussians,
   title={4D Gaussian Splatting for Real-Time Dynamic Scene Rendering},
