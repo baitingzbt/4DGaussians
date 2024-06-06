@@ -167,6 +167,16 @@ Some source code of ours is borrowed from [3DGS](https://github.com/graphdeco-in
 We would like to express our sincere gratitude to [@zhouzhenghong-gt](https://github.com/zhouzhenghong-gt/) for his revisions to our code and discussions on the content of our paper.
 ## Citation
 Some insights about neural voxel grids and dynamic scenes reconstruction originate from [TiNeuVox](https://github.com/hustvl/TiNeuVox). If you find this repository/work helpful in your research, welcome to cite these papers and give a ⭐. 
+
+## Using Python 3.9
+conda install nvidia/label/cuda-11.8.0::cuda-toolkit
+conda install conda-forge::cudatoolkit-dev
+pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+
+pip install -e submodules/depth-diff-gaussian-rasterization
+pip install -e submodules/simple-knn
+
+finally, other packages using pip.
 ```
 @article{wu20234dgaussians,
   title={4D Gaussian Splatting for Real-Time Dynamic Scene Rendering},
