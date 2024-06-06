@@ -170,10 +170,13 @@ Some insights about neural voxel grids and dynamic scenes reconstruction origina
 
 ## Using Python 3.9
 conda install nvidia/label/cuda-11.8.0::cuda-toolkit
+
 conda install conda-forge::cudatoolkit-dev
+
 pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 
 pip install -e submodules/depth-diff-gaussian-rasterization
+
 pip install -e submodules/simple-knn
 
 finally, other packages using pip.
