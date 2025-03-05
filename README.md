@@ -169,6 +169,7 @@ We would like to express our sincere gratitude to [@zhouzhenghong-gt](https://gi
 Some insights about neural voxel grids and dynamic scenes reconstruction originate from [TiNeuVox](https://github.com/hustvl/TiNeuVox). If you find this repository/work helpful in your research, welcome to cite these papers and give a ⭐. 
 
 ## Using Python 3.9
+```bash
 conda install nvidia/label/cuda-11.8.0::cuda-toolkit
 
 conda install conda-forge::cudatoolkit-dev
@@ -178,14 +179,15 @@ pip3 install torch torchvision torchaudio --index-url https://download.pytorch.o
 pip install -e submodules/depth-diff-gaussian-rasterization
 
 pip install -e submodules/simple-knn
-
+```
 finally, other packages using pip. Note: key is to align versions of torch and cuda. cuda-toolkit is 11.8 and cudatoolkit-dev is 11.7, this is espected. Don't install cuda-toolkit 11.7, otherwise you might run into troubles later...
 
 Might also need the following:
-
+```bash
 conda install conda-forge::glm
 
 conda install -c numba cudatoolkit=11.8
+```
 ```
 @article{wu20234dgaussians,
   title={4D Gaussian Splatting for Real-Time Dynamic Scene Rendering},
